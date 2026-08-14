@@ -51,7 +51,7 @@ var ResultCode: Integer; Params: String;
 begin
   if CurStep = ssPostInstall then
   begin
-    Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\install-service.ps1') + '" -InstallPath "' + ExpandConstant('{app}') + '" -SetupCode "' + CodePage.Values[0] + '"';
+    Params := '-NoProfile -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{app}\install-service.ps1')) + ' -InstallPath ' + AddQuotes(ExpandConstant('{app}')) + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
     if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
       MsgBox('客户端服务安装失败，请确认使用管理员权限后重试。错误代码: ' + IntToStr(ResultCode), mbError, MB_OK);
   end;
@@ -60,3 +60,8 @@ end;
 [UninstallRun]
 Filename: "sc.exe"; Parameters: "stop RentDeviceAgent"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "delete RentDeviceAgent"; Flags: runhidden waituntilterminated
+
+[Icons]
+Name: "{autodesktop}\Rent Device Agent"; Filename: "{app}\RentDeviceAgent.exe"
+Name: "{group}\Rent Device Agent"; Filename: "{app}\RentDeviceAgent.exe"
+Name: "{userstartup}\Rent Device Agent"; Filename: "{app}\RentDeviceAgent.exe"; WorkingDir: "{app}"

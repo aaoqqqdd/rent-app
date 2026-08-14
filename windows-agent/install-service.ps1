@@ -20,7 +20,7 @@ if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
   Start-Sleep -Seconds 1
 }
 
-sc.exe create $serviceName binPath= "`"$exe`"" start= auto DisplayName= "Rent Device Agent" | Out-Null
+sc.exe create $serviceName binPath= "`"$exe`" --service" start= auto DisplayName= "Rent Device Agent" | Out-Null
 sc.exe description $serviceName "Connects this rental device to the Rent management website." | Out-Null
 sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
 Start-Service $serviceName

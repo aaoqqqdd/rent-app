@@ -4,6 +4,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Net;
+using System.Diagnostics;
 using Microsoft.Extensions.Options;
 
 public sealed class AgentWorker : BackgroundService
@@ -17,6 +19,9 @@ public sealed class AgentWorker : BackgroundService
     private string? _token;
     private string _deviceMode = "normal";
     private bool _beforeSnapshotSent;
+    private string _statusText = "正在连接";
+    private JsonElement? _rental;
+    private DateTime _lastUpdateCheck = DateTime.MinValue;
 
     public AgentWorker(IHttpClientFactory httpClientFactory, IOptions<AgentOptions> options, ILogger<AgentWorker> logger)
     {
@@ -40,6 +45,7 @@ public sealed class AgentWorker : BackgroundService
                 {
                     await SendHeartbeatAsync(stoppingToken);
                     await ReadStateAsync(stoppingToken);
+                    await CheckForUpdateAsync(stoppingToken);
                 }
             }
             catch (Exception ex)
@@ -108,7 +114,37 @@ public sealed class AgentWorker : BackgroundService
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { _token = null; SaveState(); return; }
         response.EnsureSuccessStatusCode();
         var state = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
+        if (state.TryGetProperty("rental", out var rental)) _rental = rental;
+        _statusText = "已连接";
+        var memory = ReadMemoryMb() / 1024d;
+        var storage = new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;
+        var startDate = _rental?.TryGetProperty("start_date", out var start) == true ? start.ToString() : null;
+        var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
+        await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json"), JsonSerializer.Serialize(new { Status = _statusText, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, MemoryGb = memory, StorageGb = storage, Version = _options.Version, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }), cancellationToken);
         _logger.LogDebug("Current device state: {State}", state.ToString());
+    }
+
+    private async Task CheckForUpdateAsync(CancellationToken cancellationToken)
+    {
+        if ((DateTime.UtcNow - _lastUpdateCheck).TotalHours < Math.Max(1, _options.UpdateCheckIntervalHours)) return;
+        _lastUpdateCheck = DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(_options.UpdateManifestUrl)) return;
+        try
+        {
+            var client = _httpClientFactory.CreateClient("rent");
+            var update = await client.GetFromJsonAsync<UpdateInfo>(_options.UpdateManifestUrl, cancellationToken);
+            if (update is null || string.IsNullOrWhiteSpace(update.Version) || string.IsNullOrWhiteSpace(update.DownloadUrl) || update.Version == _options.Version) return;
+            var pending = Path.Combine(AppContext.BaseDirectory, "RentDeviceAgent.new.exe");
+            await using var source = await client.GetStreamAsync(update.DownloadUrl, cancellationToken);
+            await using var target = File.Create(pending);
+            await source.CopyToAsync(target, cancellationToken);
+            var script = Path.Combine(Path.GetTempPath(), "RentDeviceAgent-update.ps1");
+            await File.WriteAllTextAsync(script, $"Start-Sleep -Seconds 3; Move-Item -Force '{pending}' '{Environment.ProcessPath}'; Start-Process '{Environment.ProcessPath}'", cancellationToken);
+            Process.Start(new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\"") { CreateNoWindow = true, UseShellExecute = false });
+            _statusText = $"发现新版本 {update.Version}，正在更新";
+            Environment.Exit(0);
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Update check failed"); }
     }
 
     private HttpClient AuthenticatedClient()
@@ -158,6 +194,7 @@ public sealed class AgentWorker : BackgroundService
     private sealed record State(string? Token);
     private sealed record RegisterResponse(bool Ok, string DeviceId, string SerialNumber, string Token);
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage);
+    private sealed record UpdateInfo(string Version, string DownloadUrl);
 
     [DllImport("user32.dll")]
     private static extern bool LockWorkStation();
