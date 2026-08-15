@@ -4,13 +4,13 @@ using System.Text.Json;
 public sealed class AgentLeaseOverlayForm : Form
 {
     private readonly Label _lease = new() { AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI", 13, FontStyle.Bold) };
-    private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Information, Visible = true, Text = "Rent Device Agent" };
+    private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "Rent 设备管理" };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 5000 };
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 
     public AgentLeaseOverlayForm()
     {
-        Text = "Rent Device Agent";
+        Text = "Rent 设备管理";
         Width = 330;
         Height = 145;
         FormBorderStyle = FormBorderStyle.None;
@@ -34,6 +34,7 @@ public sealed class AgentLeaseOverlayForm : Form
         FormClosing += (_, e) => e.Cancel = true;
         _timer.Tick += (_, _) => RefreshSnapshot();
         _timer.Start();
+        Shown += (_, _) => Hide();
         RefreshSnapshot();
     }
 
@@ -41,13 +42,13 @@ public sealed class AgentLeaseOverlayForm : Form
     {
         try
         {
-            if (!File.Exists(SnapshotPath)) { _lease.Text = "租期：等待设备连接"; _tray.Text = "Rent Device Agent · 等待租期"; return; }
+            if (!File.Exists(SnapshotPath)) { _lease.Text = "租期：等待设备连接"; _tray.Text = "Rent 设备管理 · 等待设备连接"; return; }
             var data = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(SnapshotPath));
             if (data is null) return;
             if (string.Equals(data.BindingStatus, "unbound", StringComparison.OrdinalIgnoreCase))
             {
                 _lease.Text = "设备未绑定";
-                _tray.Text = "Rent Device Agent · 设备未绑定";
+                _tray.Text = "Rent 设备管理 · 设备未绑定";
                 return;
             }
             if (data.ProtocolRequired && !AgentSoftwareAgreementForm.IsAccepted(data.StartDate ?? "current"))
@@ -57,7 +58,7 @@ public sealed class AgentLeaseOverlayForm : Form
                 return;
             }
             _lease.Text = $"到期：{data.EndDate ?? "暂无租期"}";
-            _tray.Text = $"Rent Device Agent · 到期：{data.EndDate ?? "暂无租期"}";
+            _tray.Text = $"Rent 设备管理 · 到期：{data.EndDate ?? "暂无租期"}";
         }
         catch { _lease.Text = "租期：暂时无法读取"; }
     }

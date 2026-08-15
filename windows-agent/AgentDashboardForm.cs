@@ -8,14 +8,14 @@ public sealed class AgentDashboardForm : Form
     private readonly Label _hardware = LabelFor("内存：—    剩余存储：—");
     private readonly Label _version = LabelFor("版本：—");
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 3000 };
-    private readonly NotifyIcon _notify = new() { Icon = SystemIcons.Information, Visible = true, Text = "Rent Device Agent" };
+    private readonly NotifyIcon _notify = new() { Icon = SystemIcons.Application, Visible = false, Text = "Rent 设备管理" };
     private string _customerPanelUrl = "";
     private bool _expiryNotified;
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 
     public AgentDashboardForm()
     {
-        Text = "Rent Device Agent";
+        Text = "Rent 设备管理";
         Width = 920;
         Height = 640;
         FormBorderStyle = FormBorderStyle.Sizable;

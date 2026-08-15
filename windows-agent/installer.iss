@@ -1,4 +1,4 @@
-#define AppName "Rent Device Agent"
+#define AppName "Rent 设备管理"
 #define AppVersion "1.0.0"
 #define AppPublisher "Rent"
 #define AppExeName "RentDeviceAgent.exe"
@@ -22,6 +22,7 @@ UninstallDisplayIcon={app}\RentDeviceAgent.exe
 Source: "publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "install-service.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README-install.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "logo.svg"; DestDir: "{app}"; Flags: ignoreversion
 
 [Code]
 var
@@ -80,6 +81,6 @@ Filename: "sc.exe"; Parameters: "delete RentDeviceAgent"; Flags: runhidden waitu
 Type: filesandordirs; Name: "{commonappdata}\RentDeviceAgent"
 
 [Icons]
-Name: "{autodesktop}\Rent Device Agent"; Filename: "{app}\RentDeviceAgent.exe"
-Name: "{group}\Rent Device Agent"; Filename: "{app}\RentDeviceAgent.exe"
-Name: "{userstartup}\Rent Device Agent"; Filename: "{app}\RentDeviceAgent.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\Rent 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
+Name: "{group}\Rent 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
+Name: "{userstartup}\Rent 设备管理"; Filename: "{app}\RentDeviceAgent.exe"; WorkingDir: "{app}"
