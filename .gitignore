@@ -1,0 +1,6 @@
+windows-agent/bin/
+windows-agent/obj/
+windows-agent/publish/
+windows-agent/output/
+windows-agent/*.pdb
+windows-agent/*.zip
