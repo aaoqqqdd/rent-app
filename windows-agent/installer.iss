@@ -1,6 +1,6 @@
 #define AppName "Rent 设备管理"
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "0.6.2"
 #endif
 #define AppPublisher "Rent"
 #define AppExeName "RentDeviceAgent.exe"

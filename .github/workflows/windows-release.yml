@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_level:
+        description: '版本级别：patch=修复，minor=新功能，major=正式版'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
@@ -22,9 +32,20 @@ jobs:
         shell: pwsh
         run: |
           $tags = git tag --list 'v*' --sort=-version:refname
-          $latest = if ($tags) { $tags[0] -replace '^v', '' } else { '0.0.0' }
+          $latest = if ($tags) { $tags[0] -replace '^v', '' } else { '0.6.2' }
           $parts = $latest.Split('.')
-          $version = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+          $level = '${{ inputs.release_level }}'
+          if (-not $level) {
+            $message = git log -1 --pretty=%s
+            $level = if ($message -match 'release-major|BREAKING CHANGE|^[a-z]+\([^)]*\)!:') { 'major' } elseif ($message -match '^feat(\([^)]*\))?:') { 'minor' } else { 'patch' }
+          }
+          if ($level -eq 'major') {
+            $version = '1.0.0'
+          } elseif ($level -eq 'minor') {
+            $version = "$($parts[0]).$([int]$parts[1] + 1).0"
+          } else {
+            $version = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+          }
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=v$version" >> $env:GITHUB_OUTPUT
 
@@ -43,23 +64,40 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Publish executable
+      - name: Publish x64 executable
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:Version=$env:RELEASE_VERSION -o windows-agent/publish
+        run: dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:Version=$env:RELEASE_VERSION -o windows-agent/publish-x64
+
+      - name: Publish x86 executable
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x86 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:Version=$env:RELEASE_VERSION -o windows-agent/publish-x86
 
       - name: Stamp client version
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $path = 'windows-agent/publish/appsettings.json'
+          $path = 'windows-agent/publish-x64/appsettings.json'
           $settings = Get-Content $path -Raw | ConvertFrom-Json
           $settings.RentDeviceAgent.Version = $env:RELEASE_VERSION
           $settings.RentDeviceAgent.GitHubRepository = 'aaoqqqdd/rent-app'
-          $settings.RentDeviceAgent.GitHubReleaseAsset = 'RentDeviceAgent.exe'
+          $settings.RentDeviceAgent.GitHubReleaseAsset = 'RentDeviceAgent-x64.exe'
           $settings | ConvertTo-Json -Depth 8 | Set-Content $path -Encoding UTF8
+          Copy-Item $path 'windows-agent/publish-x86/appsettings.json' -Force
+          $x86 = Get-Content 'windows-agent/publish-x86/appsettings.json' -Raw | ConvertFrom-Json
+          $x86.RentDeviceAgent.GitHubReleaseAsset = 'RentDeviceAgent-x86.exe'
+          $x86 | ConvertTo-Json -Depth 8 | Set-Content 'windows-agent/publish-x86/appsettings.json' -Encoding UTF8
+
+      - name: Rename executables for architecture
+        shell: pwsh
+        run: |
+          Copy-Item windows-agent/publish-x64/RentDeviceAgent.exe windows-agent/publish-x64/RentDeviceAgent-x64.exe
+          Copy-Item windows-agent/publish-x86/RentDeviceAgent.exe windows-agent/publish-x86/RentDeviceAgent-x86.exe
+          Copy-Item windows-agent/publish-x64 windows-agent/publish -Recurse -Force
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress --yes
@@ -79,4 +117,5 @@ jobs:
           generate_release_notes: true
           files: |
             windows-agent/output/RentDeviceAgent-Setup.exe
-            windows-agent/publish/RentDeviceAgent.exe
+            windows-agent/publish-x64/RentDeviceAgent-x64.exe
+            windows-agent/publish-x86/RentDeviceAgent-x86.exe

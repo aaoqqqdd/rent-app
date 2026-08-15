@@ -227,7 +227,9 @@ public sealed class AgentWorker : BackgroundService
             if (release is null || string.IsNullOrWhiteSpace(release.TagName)) return;
             var version = release.TagName.TrimStart('v', 'V');
             if (!IsNewerVersion(version, _options.Version)) return;
-            var asset = release.Assets?.FirstOrDefault(item => string.Equals(item.Name, _options.GitHubReleaseAsset, StringComparison.OrdinalIgnoreCase))
+            var architectureAsset = Environment.Is64BitOperatingSystem ? "RentDeviceAgent-x64.exe" : "RentDeviceAgent-x86.exe";
+            var asset = release.Assets?.FirstOrDefault(item => string.Equals(item.Name, architectureAsset, StringComparison.OrdinalIgnoreCase))
+                ?? release.Assets?.FirstOrDefault(item => string.Equals(item.Name, _options.GitHubReleaseAsset, StringComparison.OrdinalIgnoreCase))
                 ?? release.Assets?.FirstOrDefault(item => item.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
             if (asset is null || string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl)) return;
             var updateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "Updates");
