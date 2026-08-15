@@ -10,6 +10,7 @@ public sealed class AgentBindingForm : Form
     private readonly TextBox _code = new() { MaxLength = 6, Width = 180, Font = new Font("Microsoft YaHei UI", 18, FontStyle.Bold), TextAlign = HorizontalAlignment.Center };
     private readonly Label _message = new() { AutoSize = true, ForeColor = Color.FromArgb(166, 184, 198), MaximumSize = new Size(430, 60) };
     private static readonly string SettingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+    private static readonly string StateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent");
 
     public AgentBindingForm()
     {
@@ -34,7 +35,18 @@ public sealed class AgentBindingForm : Form
             var agent = JsonSerializer.Deserialize<Dictionary<string, object>>(settings.GetProperty("RentDeviceAgent").GetRawText()) ?? new(); agent["SetupCode"] = code; json["RentDeviceAgent"] = agent;
             File.WriteAllText(SettingsPath, JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = true }));
             _message.ForeColor = Color.FromArgb(91, 214, 173); _message.Text = "访问码已保存，正在重启客户端服务……";
-            try { RunServiceCommand("stop"); Thread.Sleep(2500); RunServiceCommand("start"); } catch { _message.Text = "访问码已保存，请以管理员身份重启 RentDeviceAgent 服务。"; return; }
+            try
+            {
+                RunServiceCommand("stop");
+                Thread.Sleep(2500);
+                // The old token prevents the worker from registering with the new code.
+                // Remove only local binding state; the website binding is controlled by the access code.
+                File.Delete(Path.Combine(StateDirectory, "state.json"));
+                File.Delete(Path.Combine(StateDirectory, "unbound.flag"));
+                File.Delete(Path.Combine(StateDirectory, "dashboard.json"));
+                RunServiceCommand("start");
+            }
+            catch { _message.Text = "访问码已保存，请以管理员身份重启 RentDeviceAgent 服务。"; return; }
             Close();
         }
         catch (UnauthorizedAccessException) { _message.ForeColor = Color.FromArgb(248, 113, 113); _message.Text = "无法写入配置，请右键客户端并选择“以管理员身份运行”。"; }
