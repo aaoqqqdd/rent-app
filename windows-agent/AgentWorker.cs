@@ -27,6 +27,8 @@ public sealed class AgentWorker : BackgroundService
     private DateTime _lastUpdateCheck = DateTime.MinValue;
     private int _consecutiveFailures;
     private bool _bindingRevoked;
+    private string? _deviceId;
+    private string? _serialNumber;
 
     public AgentWorker(IHttpClientFactory httpClientFactory, IOptions<AgentOptions> options, ILogger<AgentWorker> logger)
     {
@@ -84,6 +86,8 @@ public sealed class AgentWorker : BackgroundService
         var result = await response.Content.ReadFromJsonAsync<RegisterResponse>(cancellationToken: cancellationToken);
         if (string.IsNullOrWhiteSpace(result?.Token)) throw new InvalidOperationException("Registration response did not contain a token");
         _token = result.Token;
+        _deviceId = result.DeviceId;
+        _serialNumber = result.SerialNumber;
         if (string.IsNullOrWhiteSpace(_token)) throw new InvalidOperationException("Registration token is empty");
         SaveState();
         _options.SerialNumber = result.SerialNumber;
@@ -116,8 +120,9 @@ public sealed class AgentWorker : BackgroundService
             cpu = ReadWmiValue("Win32_Processor", "Name"),
             memoryMb = ReadMemoryMb(),
             storageFreeBytes = new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace,
+            version = _options.Version,
             inspectionType = _deviceMode == "return" ? "after_return" : (_beforeSnapshotSent ? "automated_health" : "before_rental"),
-            snapshot = new { hostname = Environment.MachineName, osVersion = Environment.OSVersion.VersionString, cpu = ReadWmiValue("Win32_Processor", "Name"), memoryMb = ReadMemoryMb(), storageFreeBytes = new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace }
+            snapshot = new { hostname = Environment.MachineName, osVersion = Environment.OSVersion.VersionString, cpu = ReadWmiValue("Win32_Processor", "Name"), memoryMb = ReadMemoryMb(), storageFreeBytes = new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace, version = _options.Version }
         };
         using var response = await client.PostAsJsonAsync(Url("/api/device-agent/heartbeat"), payload, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); return; }
@@ -143,7 +148,7 @@ public sealed class AgentWorker : BackgroundService
         var startDate = _rental?.TryGetProperty("start_date", out var start) == true ? start.ToString() : null;
         var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
         var rentalStarted = _rental.HasValue && string.Equals(_rental.Value.GetProperty("status").ToString(), "active", StringComparison.OrdinalIgnoreCase) && DateTime.TryParse(startDate, out var rentalStart) && rentalStart.Date <= DateTime.Now.Date;
-        await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json"), JsonSerializer.Serialize(new { Status = _statusText, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, ProtocolRequired = rentalStarted, Version = _options.Version, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }), cancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json"), JsonSerializer.Serialize(new { Status = _statusText, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, ProtocolRequired = rentalStarted, Version = _options.Version, DeviceId = _deviceId, SerialNumber = _serialNumber ?? _options.SerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }), cancellationToken);
         SaveState();
         if (state.TryGetProperty("cleanupRequested", out var cleanup) && cleanup.GetBoolean()) await CleanupNonAdminProfilesAsync(cancellationToken);
         _logger.LogDebug("Current device state: {State}", state.ToString());
@@ -282,6 +287,8 @@ public sealed class AgentWorker : BackgroundService
             var plaintext = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.LocalMachine);
             var state = JsonSerializer.Deserialize<State>(plaintext);
             _token = state?.Token;
+            _deviceId = state?.DeviceId;
+            _serialNumber = state?.SerialNumber;
             _trustedServerTime = state?.TrustedServerTime;
             if (!string.IsNullOrWhiteSpace(state?.RentalJson)) _rental = JsonSerializer.Deserialize<JsonElement>(state.RentalJson);
         }
@@ -290,7 +297,7 @@ public sealed class AgentWorker : BackgroundService
 
     private void SaveState()
     {
-        var plaintext = JsonSerializer.SerializeToUtf8Bytes(new State(_token, _trustedServerTime, _rental?.ToString()));
+        var plaintext = JsonSerializer.SerializeToUtf8Bytes(new State(_token, _trustedServerTime, _rental?.ToString(), _deviceId, _serialNumber));
         var encrypted = ProtectedData.Protect(plaintext, null, DataProtectionScope.LocalMachine);
         File.WriteAllText(_statePath, Convert.ToBase64String(encrypted));
     }
@@ -312,7 +319,7 @@ public sealed class AgentWorker : BackgroundService
     }
 
     private string? _trustedServerTime;
-    private sealed record State(string? Token, string? TrustedServerTime, string? RentalJson);
+    private sealed record State(string? Token, string? TrustedServerTime, string? RentalJson, string? DeviceId = null, string? SerialNumber = null);
     private sealed record RegisterResponse(bool Ok, string DeviceId, string SerialNumber, string Token);
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
     private sealed record GitHubRelease(string TagName, GitHubAsset[]? Assets);

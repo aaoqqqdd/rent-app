@@ -13,6 +13,7 @@ public sealed class AgentDashboardForm : Form
     private readonly Label _rental = ValueLabel("—");
     private readonly Label _hardware = ValueLabel("—");
     private readonly Label _version = ValueLabel("—");
+    private readonly Label _identity = ValueLabel("—");
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 3000 };
     private readonly NotifyIcon _notify = new() { Icon = SystemIcons.Application, Visible = false, Text = "PC Rental 设备管理" };
     private string _customerPanelUrl = "";
@@ -58,7 +59,7 @@ public sealed class AgentDashboardForm : Form
     private Control Footer()
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 }; layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-        _version.ForeColor = Muted; _version.Font = new Font("Segoe UI", 9); _version.Margin = new Padding(0, 8, 0, 0); layout.Controls.Add(_version, 0, 0);
+        _version.ForeColor = Muted; _version.Font = new Font("Segoe UI", 9); _version.Margin = new Padding(0, 2, 0, 0); _identity.ForeColor = Muted; _identity.Font = new Font("Segoe UI", 9); _identity.Margin = new Padding(0, 20, 0, 0); layout.Controls.Add(_version, 0, 0); layout.Controls.Add(_identity, 0, 1);
         var refresh = ActionButton("刷新  [F5]", Color.FromArgb(35, 58, 78)); refresh.Anchor = AnchorStyles.Right; refresh.Click += (_, _) => RefreshSnapshot(); layout.Controls.Add(refresh, 1, 0); return layout;
     }
 
@@ -67,7 +68,7 @@ public sealed class AgentDashboardForm : Form
         try
         {
             if (!File.Exists(SnapshotPath)) return; var data = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(SnapshotPath)); if (data is null) return;
-            _status.Text = data.Status; _mode.Text = data.DeviceMode; _rental.Text = data.EndDate is null ? "暂无租期" : $"{data.StartDate ?? "—"}  —  {data.EndDate}"; _hardware.Text = $"内存 {data.MemoryGb:0.0} GB  ·  剩余存储 {data.StorageGb:0.0} GB"; _version.Text = $"版本 {data.Version}  ·  最后同步 {data.UpdatedAt:yyyy-MM-dd HH:mm:ss}"; _customerPanelUrl = data.ApiBaseUrl?.TrimEnd('/') + "/login";
+            _status.Text = data.Status; _mode.Text = data.DeviceMode; _rental.Text = data.EndDate is null ? "暂无租期" : $"{data.StartDate ?? "—"}  —  {data.EndDate}"; _hardware.Text = $"内存 {data.MemoryGb:0.0} GB  ·  剩余存储 {data.StorageGb:0.0} GB"; _version.Text = $"版本 {data.Version}  ·  最后同步 {data.UpdatedAt:yyyy-MM-dd HH:mm:ss}"; _identity.Text = $"识别码 {data.DeviceId ?? "未绑定"}  ·  序列号 {data.SerialNumber ?? "—"}"; _customerPanelUrl = data.ApiBaseUrl?.TrimEnd('/') + "/login";
             if (!_expiryNotified && DateTime.TryParse(data.EndDate, out var endDate) && (endDate.Date - DateTime.Now.Date).TotalDays <= 3 && endDate.Date >= DateTime.Now.Date) { _notify.ShowBalloonTip(8000, "租期即将到期", $"设备租期将在 {endDate:yyyy-MM-dd} 到期。", ToolTipIcon.Warning); _expiryNotified = true; }
         }
         catch { _status.Text = "暂时无法读取状态"; }
@@ -78,5 +79,5 @@ public sealed class AgentDashboardForm : Form
     private static Label LabelFor(string text, float size = 15, FontStyle style = FontStyle.Regular) => new() { Text = text, AutoSize = true, Font = new Font("Segoe UI", size, style), ForeColor = Color.White };
     private static Label ValueLabel(string text) => LabelFor(text, 14, FontStyle.Bold);
     private static Button ActionButton(string text, Color background) => new() { Text = text, AutoSize = true, Height = 34, FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 }, BackColor = background, ForeColor = Color.White, Padding = new Padding(14, 0, 14, 0), Cursor = Cursors.Hand };
-    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl);
+    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? DeviceId = null, string? SerialNumber = null);
 }
