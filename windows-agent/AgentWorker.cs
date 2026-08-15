@@ -121,7 +121,59 @@ public sealed class AgentWorker : BackgroundService
         var startDate = _rental?.TryGetProperty("start_date", out var start) == true ? start.ToString() : null;
         var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
         await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json"), JsonSerializer.Serialize(new { Status = _statusText, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, MemoryGb = memory, StorageGb = storage, Version = _options.Version, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }), cancellationToken);
+        if (state.TryGetProperty("cleanupRequested", out var cleanup) && cleanup.GetBoolean()) await CleanupNonAdminProfilesAsync(cancellationToken);
         _logger.LogDebug("Current device state: {State}", state.ToString());
+    }
+
+    private async Task CleanupNonAdminProfilesAsync(CancellationToken cancellationToken)
+    {
+        var removed = new List<string>();
+        var skipped = new List<string>();
+        var errors = new List<string>();
+        try
+        {
+            foreach (var processName in new[] { "chrome", "msedge", "firefox", "微信", "WeChat", "WeChatApp" })
+                foreach (var process in Process.GetProcessesByName(processName)) try { process.Kill(true); } catch { }
+            var administrators = GetAdministratorNames();
+            var usersRoot = Path.Combine(Environment.GetEnvironmentVariable("SystemDrive") ?? "C:", "Users");
+            foreach (var profile in Directory.Exists(usersRoot) ? Directory.GetDirectories(usersRoot) : Array.Empty<string>())
+            {
+                var name = Path.GetFileName(profile.TrimEnd(Path.DirectorySeparatorChar));
+                if (string.IsNullOrWhiteSpace(name) || new[] { "Public", "Default", "Default User", "All Users" }.Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
+                if (administrators.Contains(name, StringComparer.OrdinalIgnoreCase)) { skipped.Add(name); continue; }
+                foreach (var target in new[] {
+                    Path.Combine(profile, "Downloads"), Path.Combine(profile, "Desktop"), Path.Combine(profile, "Documents"),
+                    Path.Combine(profile, "AppData", "Local", "Google", "Chrome", "User Data"),
+                    Path.Combine(profile, "AppData", "Local", "Microsoft", "Edge", "User Data"),
+                    Path.Combine(profile, "AppData", "Roaming", "Mozilla", "Firefox"),
+                    Path.Combine(profile, "AppData", "Roaming", "Tencent", "WeChat"),
+                    Path.Combine(profile, "Documents", "WeChat Files")
+                })
+                {
+                    if (!Directory.Exists(target)) continue;
+                    try { Directory.Delete(target, true); removed.Add(target); } catch (Exception error) { errors.Add($"{target}: {error.Message}"); }
+                }
+            }
+        }
+        catch (Exception error) { errors.Add(error.Message); }
+        using var response = await AuthenticatedClient().PostAsJsonAsync(Url("/api/device-agent/cleanup-result"), new { ok = errors.Count == 0, removed, skipped, errors }, cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
+    private static HashSet<string> GetAdministratorNames()
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Administrator", "admin" };
+        try
+        {
+            using var searcher = new ManagementObjectSearcher("SELECT PartComponent FROM Win32_GroupUser WHERE GroupComponent LIKE '%Administrators%'");
+            foreach (ManagementObject item in searcher.Get())
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(item["PartComponent"]?.ToString() ?? "", "Name=\\\"([^\\\"]+)\\\"");
+                if (match.Success) names.Add(match.Groups[1].Value);
+            }
+        }
+        catch { }
+        return names;
     }
 
     private async Task CheckForUpdateAsync(CancellationToken cancellationToken)
@@ -193,7 +245,7 @@ public sealed class AgentWorker : BackgroundService
 
     private sealed record State(string? Token);
     private sealed record RegisterResponse(bool Ok, string DeviceId, string SerialNumber, string Token);
-    private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage);
+    private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
     private sealed record UpdateInfo(string Version, string DownloadUrl);
 
     [DllImport("user32.dll")]
