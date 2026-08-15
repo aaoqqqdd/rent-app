@@ -26,9 +26,9 @@ public sealed class AgentDashboardForm : Form
         StartPosition = FormStartPosition.CenterScreen; BackColor = Navy; ForeColor = Color.White;
         AutoScaleMode = AutoScaleMode.Dpi; Font = new Font("Microsoft YaHei UI", 10); KeyPreview = true;
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(32, 26, 32, 28), BackColor = Navy };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 94)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         root.Controls.Add(Header(), 0, 0); root.Controls.Add(Content(), 0, 1); root.Controls.Add(Footer(), 0, 2); Controls.Add(root);
-        KeyDown += (_, e) => { if (e.KeyCode == Keys.F1) OpenCustomerPanel(); if (e.KeyCode == Keys.F5) RefreshSnapshot(); e.Handled = true; };
+        KeyDown += (_, e) => { if (e.KeyCode == Keys.F1) OpenCustomerPanel(); if (e.KeyCode == Keys.F5) RequestRefresh(); e.Handled = true; };
         _notify.DoubleClick += (_, _) => { Show(); Activate(); }; _timer.Tick += (_, _) => RefreshSnapshot(); _timer.Start(); RefreshSnapshot();
     }
 
@@ -36,6 +36,7 @@ public sealed class AgentDashboardForm : Form
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var eyebrow = LabelFor("PC RENTAL / DEVICE AGENT", 9, FontStyle.Bold); eyebrow.ForeColor = Mint; eyebrow.Margin = new Padding(0, 0, 0, 3);
         var title = LabelFor("设备控制台", 25, FontStyle.Bold); title.Margin = new Padding(0); layout.Controls.Add(eyebrow, 0, 0); layout.Controls.Add(title, 0, 1);
         var button = ActionButton("打开客户面板  [F1]", Blue); button.AutoSize = false; button.Dock = DockStyle.Fill; button.Margin = new Padding(12, 0, 0, 8); button.Click += (_, _) => OpenCustomerPanel(); layout.Controls.Add(button, 1, 1); return layout;
@@ -45,7 +46,7 @@ public sealed class AgentDashboardForm : Form
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(0, 16, 0, 0) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 55)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
-        layout.Controls.Add(Card("连接状态", _status, "正在与 PC Rental 平台同步"), 0, 0); layout.Controls.Add(Card("设备 ID", _deviceId, "网站用于识别这台出租设备"), 1, 0); layout.Controls.Add(Card("当前租期", _rental, "显示租期开始和到期时间"), 0, 1); layout.Controls.Add(Card("设备资源", _hardware, "最近一次心跳上报的数据"), 1, 1); return layout;
+        layout.Controls.Add(Card("连接状态", _status, "显示客户端与平台的当前连接结果"), 0, 0); layout.Controls.Add(Card("设备 ID", _deviceId, "网站用于识别这台出租设备"), 1, 0); layout.Controls.Add(Card("当前租期", _rental, "显示租期开始和到期时间"), 0, 1); layout.Controls.Add(Card("设备资源", _hardware, "最近一次心跳上报的数据"), 1, 1); return layout;
     }
 
     private Control Card(string title, Label value, string hint)
@@ -63,7 +64,19 @@ public sealed class AgentDashboardForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         _version.AutoSize = false; _version.Dock = DockStyle.Fill; _version.ForeColor = Muted; _version.Font = new Font("Microsoft YaHei UI", 9); layout.Controls.Add(_version, 0, 0);
-        var refresh = ActionButton("刷新  [F5]", Color.FromArgb(35, 58, 78)); refresh.AutoSize = false; refresh.Dock = DockStyle.Fill; refresh.Margin = new Padding(8, 0, 0, 0); refresh.Click += (_, _) => RefreshSnapshot(); layout.Controls.Add(refresh, 1, 0); return layout;
+        var refresh = ActionButton("同步一次  [F5]", Color.FromArgb(35, 58, 78)); refresh.AutoSize = false; refresh.Dock = DockStyle.Fill; refresh.Margin = new Padding(8, 0, 0, 0); refresh.Click += (_, _) => RequestRefresh(); layout.Controls.Add(refresh, 1, 0); return layout;
+    }
+
+    private void RequestRefresh()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(SnapshotPath)!;
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "refresh-request"), DateTime.UtcNow.ToString("O"));
+            _version.Text = "已请求立即同步，正在读取最新租期…";
+        }
+        catch (Exception ex) { _status.Text = $"无法请求同步：{ex.Message}"; }
     }
 
     private void RefreshSnapshot()

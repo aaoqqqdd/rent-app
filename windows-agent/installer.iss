@@ -1,6 +1,6 @@
 #define AppName "PC Rental 设备管理"
 #ifndef AppVersion
-  #define AppVersion "0.6.2"
+  #define AppVersion "0.11.20"
 #endif
 #define AppPublisher "PC Rental"
 #define AppExeName "RentDeviceAgent.exe"
@@ -32,24 +32,17 @@ Source: "logo.svg"; DestDir: "{app}"; Flags: ignoreversion
 [Code]
 var
   CodePage: TInputQueryWizardPage;
-  ExistingInstall: Boolean;
 
 procedure InitializeWizard;
 begin
   CodePage := CreateInputQueryPage(wpSelectDir, '设备绑定', '设备绑定方式', '客户端会先读取 BIOS 序列号自动绑定；如果网站没有相同序列号，请填写管理员生成的 6 位访问码。');
   CodePage.Add('6 位访问码（自动绑定时可留空）:', False);
-  ExistingInstall := FileExists(ExpandConstant('{commonappdata}\RentDeviceAgent\state.json'));
-end;
-
-function ShouldSkipPage(PageID: Integer): Boolean;
-begin
-  Result := ExistingInstall and (PageID = CodePage.ID);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if (CurPageID = CodePage.ID) and not ExistingInstall then
+  if CurPageID = CodePage.ID then
   begin
     if (Length(CodePage.Values[0]) <> 0) and ((Length(CodePage.Values[0]) <> 6) or (CodePage.Values[0] < '000000') or (CodePage.Values[0] > '999999')) then
     begin
@@ -65,7 +58,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     Params := '-NoProfile -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{app}\install-service.ps1')) + ' -InstallPath ' + AddQuotes(ExpandConstant('{app}'));
-    if not ExistingInstall then Params := Params + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
+    if Length(CodePage.Values[0]) <> 0 then Params := Params + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
     if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
       MsgBox('客户端服务安装失败，错误代码: ' + IntToStr(ResultCode) + #13#10 + '详细日志：' + ExpandConstant('{commonappdata}\RentDeviceAgent\install-service.log'), mbError, MB_OK);
     if FileExists(ExpandConstant('{app}\RentDeviceAgent.exe')) then

@@ -18,6 +18,9 @@ public sealed class AgentWorker : BackgroundService
     private readonly string _unboundPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "RentDeviceAgent", "unbound.flag");
+    private readonly string _refreshRequestPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "RentDeviceAgent", "refresh-request");
     private string? _token;
     private string _deviceMode = "normal";
     private bool _beforeSnapshotSent;
@@ -69,8 +72,21 @@ public sealed class AgentWorker : BackgroundService
             var seconds = _consecutiveFailures == 0
                 ? baseSeconds
                 : Math.Min(300, Math.Max(5, 5 * (1 << Math.Min(_consecutiveFailures - 1, 5))));
-            try { await Task.Delay(TimeSpan.FromSeconds(seconds), stoppingToken); }
+            try { await WaitForNextCycleAsync(seconds, stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        }
+    }
+
+    private async Task WaitForNextCycleAsync(int seconds, CancellationToken cancellationToken)
+    {
+        for (var elapsed = 0; elapsed < seconds; elapsed += 1)
+        {
+            if (File.Exists(_refreshRequestPath))
+            {
+                File.Delete(_refreshRequestPath);
+                return;
+            }
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
         }
     }
 
@@ -102,7 +118,7 @@ public sealed class AgentWorker : BackgroundService
         _bindingRevoked = false;
         File.Delete(_unboundPath);
         WriteAgentLog($"绑定成功：设备 ID={_deviceId}，网站序列号={_registeredSerialNumber}，本机序列号={_detectedSerialNumber}");
-        WriteDashboardSnapshot("已绑定，正在同步网站状态", null, null, false, ReadMemoryMb() / 1024d, GetStorageGb());
+        WriteDashboardSnapshot("已连接", null, null, false, ReadMemoryMb() / 1024d, GetStorageGb());
         _logger.LogInformation("Device registered as {DeviceId}", result.DeviceId);
     }
 
