@@ -130,11 +130,11 @@ public sealed class AgentWorker : BackgroundService
             osVersion = Environment.OSVersion.VersionString,
             cpu = ReadWmiValue("Win32_Processor", "Name"),
             memoryMb = ReadMemoryMb(),
-            storageFreeBytes = new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace,
+            storageFreeBytes = GetStorageFreeBytes(),
             version = _options.Version,
             serialNumber = _detectedSerialNumber,
             inspectionType = _deviceMode == "return" ? "after_return" : (_beforeSnapshotSent ? "automated_health" : "before_rental"),
-            snapshot = new { hostname = Environment.MachineName, osVersion = Environment.OSVersion.VersionString, cpu = ReadWmiValue("Win32_Processor", "Name"), memoryMb = ReadMemoryMb(), storageFreeBytes = new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace, version = _options.Version }
+            snapshot = new { hostname = Environment.MachineName, osVersion = Environment.OSVersion.VersionString, cpu = ReadWmiValue("Win32_Processor", "Name"), memoryMb = ReadMemoryMb(), storageFreeBytes = GetStorageFreeBytes(), version = _options.Version }
         };
         using var response = await client.PostAsJsonAsync(Url("/api/device-agent/heartbeat"), payload, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); return; }
@@ -158,7 +158,7 @@ public sealed class AgentWorker : BackgroundService
             _trustedServerTime = serverTime.ToString();
         _statusText = "已连接";
         var memory = ReadMemoryMb() / 1024d;
-        var storage = new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;
+        var storage = GetStorageFreeBytes() / 1073741824d;
         var startDate = _rental?.TryGetProperty("start_date", out var start) == true ? start.ToString() : null;
         var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
         var rentalStarted = _rental.HasValue && string.Equals(_rental.Value.GetProperty("status").ToString(), "active", StringComparison.OrdinalIgnoreCase) && DateTime.TryParse(startDate, out var rentalStart) && rentalStart.Date <= DateTime.Now.Date;
@@ -185,6 +185,11 @@ public sealed class AgentWorker : BackgroundService
     }
 
     private static double GetStorageGb() => new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;
+    private static long GetStorageFreeBytes()
+    {
+        try { return new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace; }
+        catch { return 0; }
+    }
 
     private async Task CheckForUpdateAsync(CancellationToken cancellationToken)
     {
@@ -292,7 +297,9 @@ public sealed class AgentWorker : BackgroundService
     private static long? ReadMemoryMb()
     {
         var value = ReadWmiValue("Win32_ComputerSystem", "TotalPhysicalMemory");
-        return long.TryParse(value, out var bytes) ? bytes / (1024 * 1024) : null;
+        if (long.TryParse(value, out var bytes) && bytes > 0) return bytes / (1024 * 1024);
+        var fallback = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        return fallback > 0 ? fallback / (1024 * 1024) : null;
     }
 
     private static void WriteAgentLog(string message)

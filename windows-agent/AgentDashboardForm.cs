@@ -90,7 +90,9 @@ public sealed class AgentDashboardForm : Form
             _status.Text = string.IsNullOrWhiteSpace(data.Status) ? "已连接，等待状态" : data.Status;
             _deviceId.Text = data.DeviceId ?? "未绑定";
             _rental.Text = data.EndDate is null ? "暂无租期" : $"开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate}";
-            _hardware.Text = $"内存 {data.MemoryGb:0.0} GB  ·  剩余存储 {data.StorageGb:0.0} GB";
+            var memoryGb = data.MemoryGb > 0 ? data.MemoryGb : GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1073741824d;
+            var storageGb = data.StorageGb > 0 ? data.StorageGb : ReadStorageGb();
+            _hardware.Text = $"内存 {memoryGb:0.0} GB  ·  剩余存储 {storageGb:0.0} GB";
             _version.Text = $"版本 {data.Version}  ·  最后同步 {data.UpdatedAt:yyyy-MM-dd HH:mm:ss}";
             if (!string.IsNullOrWhiteSpace(data.ApiBaseUrl)) _customerPanelUrl = $"{data.ApiBaseUrl.TrimEnd('/')}/login";
             if (!_expiryNotified && DateTime.TryParse(data.EndDate, out var endDate) && (endDate.Date - DateTime.Now.Date).TotalDays <= 3 && endDate.Date >= DateTime.Now.Date) { _notify.ShowBalloonTip(8000, "租期即将到期", $"设备租期将在 {endDate:yyyy-MM-dd} 到期。", ToolTipIcon.Warning); _expiryNotified = true; }
@@ -108,6 +110,11 @@ public sealed class AgentDashboardForm : Form
     {
         try { Process.Start(new ProcessStartInfo(_customerPanelUrl) { UseShellExecute = true }); }
         catch (Exception ex) { MessageBox.Show($"无法打开客户面板：{ex.Message}", "PC Rental", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+    private static double ReadStorageGb()
+    {
+        try { return new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d; }
+        catch { return 0; }
     }
     protected override void Dispose(bool disposing) { if (disposing) { _timer.Dispose(); _notify.Visible = false; _notify.Dispose(); } base.Dispose(disposing); }
     private static Label LabelFor(string text, float size = 15, FontStyle style = FontStyle.Regular) => new() { Text = text, AutoSize = true, Font = new Font("Microsoft YaHei UI", size, style), ForeColor = Color.White };
