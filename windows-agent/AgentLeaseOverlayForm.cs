@@ -81,10 +81,11 @@ public sealed class AgentLeaseOverlayForm : Form
                 return;
             }
             if (_bindButton is not null) _bindButton.Visible = false;
-            if (data.ProtocolRequired && !AgentSoftwareAgreementForm.IsAccepted(data.StartDate ?? "current"))
+            var rentalKey = data.RentalId ?? data.StartDate ?? "current";
+            if (data.ProtocolRequired && !AgentSoftwareAgreementForm.IsAccepted(rentalKey))
             {
                 Hide();
-                AgentSoftwareAgreementForm.ShowIfRequired(data.StartDate ?? "current", this);
+                AgentSoftwareAgreementForm.ShowIfRequired(rentalKey, this);
                 return;
             }
             _lease.Text = $"到期：{data.EndDate ?? "暂无租期"}";
@@ -100,7 +101,7 @@ public sealed class AgentLeaseOverlayForm : Form
         return File.Exists(statePath) && !File.Exists(unboundPath);
     }
 
-    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus);
+    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, string? RentalId, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus);
 
     protected override void Dispose(bool disposing)
     {

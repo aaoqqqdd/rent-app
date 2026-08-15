@@ -2,5 +2,6 @@ windows-agent/bin/
 windows-agent/obj/
 windows-agent/publish/
 windows-agent/output/
+windows-agent/release/
 windows-agent/*.pdb
 windows-agent/*.zip
