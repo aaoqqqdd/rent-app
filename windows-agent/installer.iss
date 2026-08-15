@@ -65,9 +65,19 @@ begin
   end;
 end;
 
+function InitializeUninstall(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{commonappdata}\RentDeviceAgent\unbound.flag'));
+  if not Result then
+    MsgBox('请先在网站“绑定设备”页面解绑此设备。解绑成功后，客户端界面显示“设备未绑定”，才能卸载。', mbError, MB_OK);
+end;
+
 [UninstallRun]
 Filename: "sc.exe"; Parameters: "stop RentDeviceAgent"; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "delete RentDeviceAgent"; Flags: runhidden waituntilterminated
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{commonappdata}\RentDeviceAgent"
 
 [Icons]
 Name: "{autodesktop}\Rent Device Agent"; Filename: "{app}\RentDeviceAgent.exe"

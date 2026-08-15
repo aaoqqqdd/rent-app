@@ -16,6 +16,9 @@ public sealed class AgentWorker : BackgroundService
     private readonly string _statePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "RentDeviceAgent", "state.json");
+    private readonly string _unboundPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "RentDeviceAgent", "unbound.flag");
     private string? _token;
     private string _deviceMode = "normal";
     private bool _beforeSnapshotSent;
@@ -23,6 +26,7 @@ public sealed class AgentWorker : BackgroundService
     private JsonElement? _rental;
     private DateTime _lastUpdateCheck = DateTime.MinValue;
     private int _consecutiveFailures;
+    private bool _bindingRevoked;
 
     public AgentWorker(IHttpClientFactory httpClientFactory, IOptions<AgentOptions> options, ILogger<AgentWorker> logger)
     {
@@ -35,14 +39,15 @@ public sealed class AgentWorker : BackgroundService
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_statePath)!);
         LoadState();
+        _bindingRevoked = File.Exists(_unboundPath);
         _logger.LogInformation("Rent Device Agent started");
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(_token)) await RegisterAsync(stoppingToken);
-                if (!string.IsNullOrWhiteSpace(_token))
+                if (!_bindingRevoked && string.IsNullOrWhiteSpace(_token)) await RegisterAsync(stoppingToken);
+                if (!_bindingRevoked && !string.IsNullOrWhiteSpace(_token))
                 {
                     await SendHeartbeatAsync(stoppingToken);
                     await ReadStateAsync(stoppingToken);
@@ -115,7 +120,7 @@ public sealed class AgentWorker : BackgroundService
             snapshot = new { hostname = Environment.MachineName, osVersion = Environment.OSVersion.VersionString, cpu = ReadWmiValue("Win32_Processor", "Name"), memoryMb = ReadMemoryMb(), storageFreeBytes = new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace }
         };
         using var response = await client.PostAsJsonAsync(Url("/api/device-agent/heartbeat"), payload, cancellationToken);
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { _token = null; SaveState(); return; }
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); return; }
         response.EnsureSuccessStatusCode();
         var state = await response.Content.ReadFromJsonAsync<AgentState>(cancellationToken: cancellationToken);
         if (state?.RemoteLockEnabled == true) LockWorkStation();
@@ -126,7 +131,7 @@ public sealed class AgentWorker : BackgroundService
     private async Task ReadStateAsync(CancellationToken cancellationToken)
     {
         using var response = await AuthenticatedClient().GetAsync(Url("/api/device-agent/state"), cancellationToken);
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { _token = null; SaveState(); return; }
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); return; }
         response.EnsureSuccessStatusCode();
         var state = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
         if (state.TryGetProperty("rental", out var rental)) _rental = rental;
@@ -142,6 +147,17 @@ public sealed class AgentWorker : BackgroundService
         SaveState();
         if (state.TryGetProperty("cleanupRequested", out var cleanup) && cleanup.GetBoolean()) await CleanupNonAdminProfilesAsync(cancellationToken);
         _logger.LogDebug("Current device state: {State}", state.ToString());
+    }
+
+    private void MarkUnbound()
+    {
+        _token = null;
+        _bindingRevoked = true;
+        SaveState();
+        File.WriteAllText(_unboundPath, DateTime.UtcNow.ToString("O"));
+        var dashboardPath = Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json");
+        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = "未绑定", BindingStatus = "unbound", DeviceMode = "normal", ProtocolRequired = false, Version = _options.Version, UpdatedAt = DateTime.Now }));
+        _logger.LogWarning("Device binding was revoked by the server; automatic re-registration is disabled until a new installation/binding.");
     }
 
     private async Task CleanupNonAdminProfilesAsync(CancellationToken cancellationToken)

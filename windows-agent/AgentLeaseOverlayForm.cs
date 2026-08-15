@@ -44,6 +44,12 @@ public sealed class AgentLeaseOverlayForm : Form
             if (!File.Exists(SnapshotPath)) { _lease.Text = "租期：等待设备连接"; _tray.Text = "Rent Device Agent · 等待租期"; return; }
             var data = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(SnapshotPath));
             if (data is null) return;
+            if (string.Equals(data.BindingStatus, "unbound", StringComparison.OrdinalIgnoreCase))
+            {
+                _lease.Text = "设备未绑定";
+                _tray.Text = "Rent Device Agent · 设备未绑定";
+                return;
+            }
             if (data.ProtocolRequired && !AgentSoftwareAgreementForm.IsAccepted(data.StartDate ?? "current"))
             {
                 Hide();
@@ -56,7 +62,7 @@ public sealed class AgentLeaseOverlayForm : Form
         catch { _lease.Text = "租期：暂时无法读取"; }
     }
 
-    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl);
+    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus);
 
     protected override void Dispose(bool disposing)
     {
