@@ -9,11 +9,10 @@ public sealed class AgentDashboardForm : Form
     private static readonly Color Mint = Color.FromArgb(91, 214, 173);
     private static readonly Color Muted = Color.FromArgb(166, 184, 198);
     private readonly Label _status = ValueLabel("正在读取客户端状态");
-    private readonly Label _mode = ValueLabel("—");
+    private readonly Label _deviceId = ValueLabel("未绑定");
     private readonly Label _rental = ValueLabel("—");
     private readonly Label _hardware = ValueLabel("—");
     private readonly Label _version = ValueLabel("—");
-    private readonly Label _identity = ValueLabel("—");
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 10000 };
     private readonly NotifyIcon _notify = new() { Icon = SystemIcons.Application, Visible = false, Text = "PC Rental 设备管理" };
     private string _customerPanelUrl = "";
@@ -45,7 +44,7 @@ public sealed class AgentDashboardForm : Form
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Padding = new Padding(0, 16, 0, 0) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 55)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
-        layout.Controls.Add(Card("连接状态", _status, "客户端正在与租赁平台同步"), 0, 0); layout.Controls.Add(Card("设备模式", _mode, "由租期和平台策略决定"), 1, 0); layout.Controls.Add(Card("当前租期", _rental, "租期结束后设备将按平台规则处理"), 0, 1); layout.Controls.Add(Card("设备资源", _hardware, "最近一次心跳上报的数据"), 1, 1); return layout;
+        layout.Controls.Add(Card("连接状态", _status, "正在与 PC Rental 平台同步"), 0, 0); layout.Controls.Add(Card("设备 ID", _deviceId, "网站用于识别这台出租设备"), 1, 0); layout.Controls.Add(Card("当前租期", _rental, "显示租期开始和到期时间"), 0, 1); layout.Controls.Add(Card("设备资源", _hardware, "最近一次心跳上报的数据"), 1, 1); return layout;
     }
 
     private Control Card(string title, Label value, string hint)
@@ -59,7 +58,7 @@ public sealed class AgentDashboardForm : Form
     private Control Footer()
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 }; layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
-        _version.AutoSize = false; _version.Size = new Size(600, 20); _version.ForeColor = Muted; _version.Font = new Font("Microsoft YaHei UI", 9); _identity.AutoSize = false; _identity.Size = new Size(600, 20); _identity.ForeColor = Muted; _identity.Font = new Font("Microsoft YaHei UI", 9); layout.Controls.Add(_version, 0, 0); layout.Controls.Add(_identity, 0, 1);
+        _version.AutoSize = false; _version.Size = new Size(600, 20); _version.ForeColor = Muted; _version.Font = new Font("Microsoft YaHei UI", 9); layout.Controls.Add(_version, 0, 0);
         var refresh = ActionButton("刷新  [F5]", Color.FromArgb(35, 58, 78)); refresh.Anchor = AnchorStyles.Right; refresh.Click += (_, _) => RefreshSnapshot(); layout.Controls.Add(refresh, 1, 0); return layout;
     }
 
@@ -68,7 +67,7 @@ public sealed class AgentDashboardForm : Form
         try
         {
             if (!File.Exists(SnapshotPath)) return; var data = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(SnapshotPath)); if (data is null) return;
-            _status.Text = data.Status; _mode.Text = data.DeviceMode; _rental.Text = data.EndDate is null ? "暂无租期" : $"开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate}"; _hardware.Text = $"内存 {data.MemoryGb:0.0} GB  ·  剩余存储 {data.StorageGb:0.0} GB"; _version.Text = $"版本 {data.Version}  ·  最后同步 {data.UpdatedAt:yyyy-MM-dd HH:mm:ss}"; _identity.Text = $"设备 ID：{data.DeviceId ?? "未绑定"}"; _customerPanelUrl = data.ApiBaseUrl?.TrimEnd('/') + "/login";
+            _status.Text = data.Status; _deviceId.Text = data.DeviceId ?? "未绑定"; _rental.Text = data.EndDate is null ? "暂无租期" : $"开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate}"; _hardware.Text = $"内存 {data.MemoryGb:0.0} GB  ·  剩余存储 {data.StorageGb:0.0} GB"; _version.Text = $"版本 {data.Version}  ·  最后同步 {data.UpdatedAt:yyyy-MM-dd HH:mm:ss}"; _customerPanelUrl = data.ApiBaseUrl?.TrimEnd('/') + "/login";
             if (!_expiryNotified && DateTime.TryParse(data.EndDate, out var endDate) && (endDate.Date - DateTime.Now.Date).TotalDays <= 3 && endDate.Date >= DateTime.Now.Date) { _notify.ShowBalloonTip(8000, "租期即将到期", $"设备租期将在 {endDate:yyyy-MM-dd} 到期。", ToolTipIcon.Warning); _expiryNotified = true; }
         }
         catch { _status.Text = "暂时无法读取状态"; }
