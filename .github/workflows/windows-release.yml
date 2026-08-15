@@ -2,45 +2,81 @@ name: Windows client release
 
 on:
   push:
-    tags: ['v*']
-  release:
-    types: [published]
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build-installer:
+  release:
     runs-on: windows-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          dotnet-version: '8.0.x'
-      - name: Publish self-contained client
+          fetch-depth: 0
+
+      - name: Calculate next version
+        id: version
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_NAME -match '^v(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$') { $Matches[1] } else { '1.0.0' }
-          dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false "-p:Version=$version" -o windows-agent/publish
-      - name: Stamp release version in client settings
+          $tags = git tag --list 'v*' --sort=-version:refname
+          $latest = if ($tags) { $tags[0] -replace '^v', '' } else { '0.0.0' }
+          $parts = $latest.Split('.')
+          $version = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Create version tag
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag $env:RELEASE_TAG
+          git push origin $env:RELEASE_TAG
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish executable
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:Version=$env:RELEASE_VERSION -o windows-agent/publish
+
+      - name: Stamp client version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           $path = 'windows-agent/publish/appsettings.json'
           $settings = Get-Content $path -Raw | ConvertFrom-Json
-          $settings.RentDeviceAgent.Version = if ($env:GITHUB_REF_NAME -match '^v(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$') { $Matches[1] } else { '1.0.0' }
+          $settings.RentDeviceAgent.Version = $env:RELEASE_VERSION
+          $settings.RentDeviceAgent.GitHubRepository = 'aaoqqqdd/rent-app'
           $settings.RentDeviceAgent.GitHubReleaseAsset = 'RentDeviceAgent.exe'
           $settings | ConvertTo-Json -Depth 8 | Set-Content $path -Encoding UTF8
+
       - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
+        run: choco install innosetup --no-progress --yes
+
       - name: Build installer
         shell: pwsh
-        run: iscc windows-agent/installer.iss
-      - name: Upload release installer
+        working-directory: windows-agent
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: iscc /DAppVersion=$env:RELEASE_VERSION installer.iss
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Rent Device Agent ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
           files: |
             windows-agent/output/RentDeviceAgent-Setup.exe
             windows-agent/publish/RentDeviceAgent.exe
-          generate_release_notes: true
