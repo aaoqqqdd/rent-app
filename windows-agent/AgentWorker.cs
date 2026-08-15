@@ -137,7 +137,7 @@ public sealed class AgentWorker : BackgroundService
             snapshot = new { hostname = Environment.MachineName, osVersion = Environment.OSVersion.VersionString, cpu = ReadWmiValue("Win32_Processor", "Name"), memoryMb = ReadMemoryMb(), storageFreeBytes = GetStorageFreeBytes(), version = _options.Version }
         };
         using var response = await client.PostAsJsonAsync(Url("/api/device-agent/heartbeat"), payload, cancellationToken);
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); return; }
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); WriteAgentLog("网站已解绑本机，已立即切换为未绑定状态"); return; }
         response.EnsureSuccessStatusCode();
         var heartbeatResult = await response.Content.ReadFromJsonAsync<HeartbeatResponse>(cancellationToken: cancellationToken);
         if (heartbeatResult?.Ok != true) throw new InvalidOperationException("网站未确认心跳");
@@ -150,7 +150,7 @@ public sealed class AgentWorker : BackgroundService
     private async Task ReadStateAsync(CancellationToken cancellationToken)
     {
         using var response = await AuthenticatedClient().GetAsync(Url("/api/device-agent/state"), cancellationToken);
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); return; }
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); WriteAgentLog("网站已解绑本机，已立即切换为未绑定状态"); return; }
         response.EnsureSuccessStatusCode();
         var state = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
         if (state.TryGetProperty("rental", out var rental)) _rental = rental;
