@@ -59,6 +59,21 @@ jobs:
           git tag $env:RELEASE_TAG
           git push origin $env:RELEASE_TAG
 
+      - name: Sync source appsettings version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $path = 'windows-agent/appsettings.json'
+          $settings = Get-Content $path -Raw | ConvertFrom-Json
+          $settings.RentDeviceAgent.Version = $env:RELEASE_VERSION
+          $settings | ConvertTo-Json -Depth 8 | Set-Content $path -Encoding UTF8
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add $path
+          git commit -m "chore(windows-agent): sync app version $env:RELEASE_VERSION [skip ci]"
+          git push origin HEAD:main
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
