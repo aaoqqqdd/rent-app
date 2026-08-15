@@ -37,10 +37,14 @@ var
 
 procedure InitializeWizard;
 begin
-  ExistingInstallation := FileExists(ExpandConstant('{autopf}\RentDeviceAgent\RentDeviceAgent.exe'));
+  ExistingInstallation := FileExists(ExpandConstant('{autopf}\RentDeviceAgent\RentDeviceAgent.exe')) or DirExists(ExpandConstant('{autopf}\RentDeviceAgent'));
   CodePage := CreateInputQueryPage(wpSelectDir, '设备绑定', '设备绑定方式', '客户端会先读取 BIOS 序列号自动绑定；如果网站没有相同序列号，请填写管理员生成的 6 位访问码。');
   CodePage.Add('6 位访问码（自动绑定时可留空）:', False);
   UpdatePage := CreateOutputMsgPage(wpSelectDir, '更新 Windows 客户端', '检测到已安装的客户端', '本次将更新程序并保留现有设备绑定，无需再次输入 6 位访问码。');
+  if ExistingInstallation then
+    WizardForm.NextButton.Caption := '更新'
+  else
+    WizardForm.NextButton.Caption := '安装';
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
