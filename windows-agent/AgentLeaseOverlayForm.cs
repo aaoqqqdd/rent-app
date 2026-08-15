@@ -28,6 +28,11 @@ public sealed class AgentLeaseOverlayForm : Form
         var open = new Button { Text = "打开完整界面", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(37, 99, 235), Location = new Point(18, 68) };
         open.Click += (_, _) => { using var form = new AgentDashboardForm(); form.ShowDialog(this); };
         Controls.AddRange([title, _lease, open]);
+        var windowMenu = new ContextMenuStrip();
+        windowMenu.Items.Add("隐藏租期窗口", null, (_, _) => Hide());
+        windowMenu.Items.Add("打开完整界面", null, (_, _) => open.PerformClick());
+        ContextMenuStrip = windowMenu;
+        foreach (Control control in Controls) control.ContextMenuStrip = windowMenu;
         _tray.ContextMenuStrip = new ContextMenuStrip();
         _toggleOverlay = new ToolStripMenuItem("隐藏租期窗口");
         _toggleOverlay.Click += (_, _) => ToggleOverlay();
