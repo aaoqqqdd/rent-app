@@ -58,9 +58,12 @@ public sealed class AgentDashboardForm : Form
 
     private Control Footer()
     {
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 }; layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
-        _version.AutoSize = false; _version.Size = new Size(600, 20); _version.ForeColor = Muted; _version.Font = new Font("Microsoft YaHei UI", 9); layout.Controls.Add(_version, 0, 0);
-        var refresh = ActionButton("刷新  [F5]", Color.FromArgb(35, 58, 78)); refresh.Anchor = AnchorStyles.Right; refresh.Click += (_, _) => RefreshSnapshot(); layout.Controls.Add(refresh, 1, 0); return layout;
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new Padding(0, 4, 0, 0) };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        _version.AutoSize = false; _version.Dock = DockStyle.Fill; _version.ForeColor = Muted; _version.Font = new Font("Microsoft YaHei UI", 9); layout.Controls.Add(_version, 0, 0);
+        var refresh = ActionButton("刷新  [F5]", Color.FromArgb(35, 58, 78)); refresh.AutoSize = false; refresh.Dock = DockStyle.Fill; refresh.Margin = new Padding(8, 0, 0, 0); refresh.Click += (_, _) => RefreshSnapshot(); layout.Controls.Add(refresh, 1, 0); return layout;
     }
 
     private void RefreshSnapshot()
