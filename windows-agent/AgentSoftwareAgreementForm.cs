@@ -25,8 +25,8 @@ public sealed class AgentSoftwareAgreementForm : Form
         Text = "PC Rental Device Agent · 软件使用协议";
         Width = 720; Height = 560; StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
-        TopMost = true; BackColor = Color.FromArgb(16, 24, 32); ForeColor = Color.White;
-        var title = new Label { Text = "软件使用协议", Font = new Font("Segoe UI", 20, FontStyle.Bold), AutoSize = true, Location = new Point(28, 24), ForeColor = Color.FromArgb(113, 224, 181) };
+        TopMost = true; BackColor = Color.FromArgb(16, 24, 32); ForeColor = Color.White; AutoScaleMode = AutoScaleMode.Dpi; Font = new Font("Microsoft YaHei UI", 10);
+        var title = new Label { Text = "软件使用协议", Font = new Font("Microsoft YaHei UI", 20, FontStyle.Bold), AutoSize = true, Location = new Point(28, 24), ForeColor = Color.FromArgb(113, 224, 181) };
         var notice = new Label { Text = "租赁已开始。请阅读并确认后继续使用此设备。", AutoSize = true, Location = new Point(30, 70), ForeColor = Color.LightGray };
         var text = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Text = AgreementText, Location = new Point(28, 105), Size = new Size(645, 300), BackColor = Color.FromArgb(32, 45, 56), ForeColor = Color.White, BorderStyle = BorderStyle.FixedSingle };
         var accept = new Button { Text = "同意并继续", Enabled = false, DialogResult = DialogResult.OK, Location = new Point(470, 470), Size = new Size(120, 34), BackColor = Color.FromArgb(37, 99, 235), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };

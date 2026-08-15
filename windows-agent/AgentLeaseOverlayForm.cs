@@ -3,7 +3,7 @@ using System.Text.Json;
 
 public sealed class AgentLeaseOverlayForm : Form
 {
-    private readonly Label _lease = new() { AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI", 13, FontStyle.Bold) };
+    private readonly Label _lease = new() { AutoSize = true, ForeColor = Color.White, Font = new Font("Microsoft YaHei UI", 13, FontStyle.Bold) };
     private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "PC Rental 设备管理" };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15000 };
     private ToolStripMenuItem? _toggleOverlay;
@@ -22,8 +22,10 @@ public sealed class AgentLeaseOverlayForm : Form
         Location = new Point(area.Right - Width - 18, area.Bottom - Height - 18);
         BackColor = Color.FromArgb(24, 40, 50);
         Padding = new Padding(18);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Font = new Font("Microsoft YaHei UI", 10);
 
-        var title = new Label { Text = "PC Rental Device Agent", AutoSize = true, ForeColor = Color.FromArgb(113, 224, 181), Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(18, 12) };
+        var title = new Label { Text = "PC Rental Device Agent", AutoSize = true, ForeColor = Color.FromArgb(113, 224, 181), Font = new Font("Microsoft YaHei UI", 10, FontStyle.Bold), Location = new Point(18, 12) };
         _lease.Location = new Point(18, 36);
         var open = new Button { Text = "打开完整界面", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(37, 99, 235), Location = new Point(18, 68) };
         open.Click += (_, _) => { using var form = new AgentDashboardForm(); form.ShowDialog(this); };
@@ -42,7 +44,7 @@ public sealed class AgentLeaseOverlayForm : Form
         _tray.ContextMenuStrip.Items.Add("打开完整界面", null, (_, _) => open.PerformClick());
         _tray.ContextMenuStrip.Items.Add("手动绑定设备", null, (_, _) => bind.PerformClick());
         _tray.DoubleClick += (_, _) => { Show(); Activate(); };
-        FormClosing += (_, e) => e.Cancel = true;
+        FormClosing += (_, e) => e.Cancel = IsBound();
         _timer.Tick += (_, _) => RefreshSnapshot();
         _timer.Start();
         RefreshSnapshot();
@@ -77,6 +79,13 @@ public sealed class AgentLeaseOverlayForm : Form
             _tray.Text = $"PC Rental 设备管理 · 到期：{data.EndDate ?? "暂无租期"}";
         }
         catch { _lease.Text = "租期：暂时无法读取"; }
+    }
+
+    private static bool IsBound()
+    {
+        var statePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "state.json");
+        var unboundPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "unbound.flag");
+        return File.Exists(statePath) && !File.Exists(unboundPath);
     }
 
     private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus);

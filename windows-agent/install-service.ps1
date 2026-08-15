@@ -19,6 +19,19 @@ try {
 $serviceName = "RentDeviceAgent"
 $exe = Join-Path $InstallPath "RentDeviceAgent.exe"
 if (-not (Test-Path $exe)) { throw "找不到客户端程序: $exe" }
+
+# Framework-dependent build: install the .NET 8 Windows Desktop Runtime only when missing.
+$runtimeList = if (Get-Command dotnet -ErrorAction SilentlyContinue) { & dotnet --list-runtimes 2>$null } else { @() }
+if (-not ($runtimeList -match '^Microsoft\.WindowsDesktop\.App 8\.')) {
+  $runtimeArch = if ([Environment]::Is64BitOperatingSystem) { 'win-x64' } else { 'win-x86' }
+  $runtimeUrl = "https://aka.ms/dotnet/8.0/windowsdesktop-runtime-$runtimeArch.exe"
+  $runtimeInstaller = Join-Path $env:TEMP "windowsdesktop-runtime-8-$runtimeArch.exe"
+  Write-Host "未检测到 .NET 8 Desktop Runtime，正在从 Microsoft 下载并安装..."
+  Invoke-WebRequest -Uri $runtimeUrl -OutFile $runtimeInstaller -UseBasicParsing
+  $runtimeProcess = Start-Process -FilePath $runtimeInstaller -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
+  Remove-Item $runtimeInstaller -Force -ErrorAction SilentlyContinue
+  if ($runtimeProcess.ExitCode -notin @(0, 3010)) { throw ".NET 8 Desktop Runtime 安装失败，退出码 $($runtimeProcess.ExitCode)" }
+}
 $settingsPath = Join-Path $InstallPath "appsettings.json"
 $statePath = Join-Path $env:ProgramData "RentDeviceAgent\state.json"
 $settings = if (Test-Path $settingsPath) { Get-Content $settingsPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{ RentDeviceAgent = [pscustomobject]@{} } }

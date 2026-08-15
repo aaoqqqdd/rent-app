@@ -61,6 +61,7 @@ public sealed class AgentWorker : BackgroundService
             {
                 _consecutiveFailures = Math.Min(_consecutiveFailures + 1, 6);
                 _logger.LogWarning(ex, "Rent device agent sync failed; will retry");
+                WriteAgentLog($"同步失败：{ex.GetType().Name}: {ex.Message}");
             }
 
             var baseSeconds = Math.Clamp(_options.HeartbeatIntervalSeconds, 30, 3600);
@@ -82,7 +83,12 @@ public sealed class AgentWorker : BackgroundService
         using var request = new HttpRequestMessage(HttpMethod.Post, Url("/api/device-agent/register"));
         request.Content = JsonContent.Create(new { serialNumber = _options.SerialNumber, setupCode = _options.SetupCode });
         using var response = await client.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync(cancellationToken);
+            WriteAgentLog($"绑定失败 HTTP {(int)response.StatusCode}：{error}");
+            throw new InvalidOperationException($"服务器拒绝绑定（HTTP {(int)response.StatusCode}）：{error}");
+        }
         var result = await response.Content.ReadFromJsonAsync<RegisterResponse>(cancellationToken: cancellationToken);
         if (string.IsNullOrWhiteSpace(result?.Token)) throw new InvalidOperationException("Registration response did not contain a token");
         _token = result.Token;
@@ -316,6 +322,17 @@ public sealed class AgentWorker : BackgroundService
     {
         var value = ReadWmiValue("Win32_ComputerSystem", "TotalPhysicalMemory");
         return long.TryParse(value, out var bytes) ? bytes / (1024 * 1024) : null;
+    }
+
+    private static void WriteAgentLog(string message)
+    {
+        try
+        {
+            var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent");
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(Path.Combine(directory, "agent.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+        }
+        catch { }
     }
 
     private string? _trustedServerTime;

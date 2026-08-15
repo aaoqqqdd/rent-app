@@ -24,7 +24,7 @@ public sealed class AgentDashboardForm : Form
     {
         Text = "PC Rental 设备管理"; Width = 900; Height = 620; MinimumSize = new Size(760, 520);
         StartPosition = FormStartPosition.CenterScreen; BackColor = Navy; ForeColor = Color.White;
-        Font = new Font("Segoe UI", 10); KeyPreview = true;
+        AutoScaleMode = AutoScaleMode.Dpi; Font = new Font("Microsoft YaHei UI", 10); KeyPreview = true;
         var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(32, 26, 32, 28), BackColor = Navy };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         root.Controls.Add(Header(), 0, 0); root.Controls.Add(Content(), 0, 1); root.Controls.Add(Footer(), 0, 2); Controls.Add(root);
@@ -50,16 +50,16 @@ public sealed class AgentDashboardForm : Form
 
     private Control Card(string title, Label value, string hint)
     {
-        var panel = new Panel { Dock = DockStyle.Fill, BackColor = Panel, Margin = new Padding(0, 0, 12, 12) };
-        var eyebrow = LabelFor(title.ToUpperInvariant(), 9, FontStyle.Bold); eyebrow.ForeColor = Muted; eyebrow.Location = new Point(20, 18);
-        value.Location = new Point(20, 43); value.MaximumSize = new Size(360, 48); value.ForeColor = Color.White;
-        var note = LabelFor(hint, 9); note.ForeColor = Muted; note.Location = new Point(20, 84); note.MaximumSize = new Size(360, 32); panel.Controls.AddRange([eyebrow, value, note]); return panel;
+        var panel = new Panel { Dock = DockStyle.Fill, BackColor = Panel, Margin = new Padding(0, 0, 12, 12), Padding = new Padding(20) };
+        var eyebrow = LabelFor(title.ToUpperInvariant(), 9, FontStyle.Bold); eyebrow.ForeColor = Muted; eyebrow.Dock = DockStyle.Top; eyebrow.Height = 22;
+        value.AutoSize = false; value.Dock = DockStyle.Top; value.Height = 48; value.ForeColor = Color.White; value.Padding = new Padding(0, 2, 0, 0);
+        var note = LabelFor(hint, 9); note.AutoSize = false; note.Dock = DockStyle.Fill; note.ForeColor = Muted; note.Padding = new Padding(0, 5, 0, 0); panel.Controls.Add(note); panel.Controls.Add(value); panel.Controls.Add(eyebrow); return panel;
     }
 
     private Control Footer()
     {
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 }; layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-        _version.ForeColor = Muted; _version.Font = new Font("Segoe UI", 9); _version.Margin = new Padding(0, 2, 0, 0); _identity.ForeColor = Muted; _identity.Font = new Font("Segoe UI", 9); _identity.Margin = new Padding(0, 20, 0, 0); layout.Controls.Add(_version, 0, 0); layout.Controls.Add(_identity, 0, 1);
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 }; layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
+        _version.AutoSize = false; _version.Size = new Size(600, 20); _version.ForeColor = Muted; _version.Font = new Font("Microsoft YaHei UI", 9); _identity.AutoSize = false; _identity.Size = new Size(600, 20); _identity.ForeColor = Muted; _identity.Font = new Font("Microsoft YaHei UI", 9); layout.Controls.Add(_version, 0, 0); layout.Controls.Add(_identity, 0, 1);
         var refresh = ActionButton("刷新  [F5]", Color.FromArgb(35, 58, 78)); refresh.Anchor = AnchorStyles.Right; refresh.Click += (_, _) => RefreshSnapshot(); layout.Controls.Add(refresh, 1, 0); return layout;
     }
 
@@ -76,7 +76,7 @@ public sealed class AgentDashboardForm : Form
 
     private void OpenCustomerPanel() { if (!string.IsNullOrWhiteSpace(_customerPanelUrl)) Process.Start(new ProcessStartInfo(_customerPanelUrl) { UseShellExecute = true }); }
     protected override void Dispose(bool disposing) { if (disposing) { _timer.Dispose(); _notify.Visible = false; _notify.Dispose(); } base.Dispose(disposing); }
-    private static Label LabelFor(string text, float size = 15, FontStyle style = FontStyle.Regular) => new() { Text = text, AutoSize = true, Font = new Font("Segoe UI", size, style), ForeColor = Color.White };
+    private static Label LabelFor(string text, float size = 15, FontStyle style = FontStyle.Regular) => new() { Text = text, AutoSize = true, Font = new Font("Microsoft YaHei UI", size, style), ForeColor = Color.White };
     private static Label ValueLabel(string text) => LabelFor(text, 14, FontStyle.Bold);
     private static Button ActionButton(string text, Color background) => new() { Text = text, AutoSize = true, Height = 34, FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 }, BackColor = background, ForeColor = Color.White, Padding = new Padding(14, 0, 14, 0), Cursor = Cursors.Hand };
     private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? DeviceId = null, string? SerialNumber = null);

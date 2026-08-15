@@ -63,14 +63,16 @@ begin
   begin
     Params := '-NoProfile -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{app}\install-service.ps1')) + ' -InstallPath ' + AddQuotes(ExpandConstant('{app}'));
     if not ExistingInstall then Params := Params + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
-    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
       MsgBox('客户端服务安装失败，错误代码: ' + IntToStr(ResultCode) + #13#10 + '详细日志：' + ExpandConstant('{commonappdata}\RentDeviceAgent\install-service.log'), mbError, MB_OK);
   end;
 end;
 
 function InitializeUninstall(): Boolean;
 begin
-  Result := FileExists(ExpandConstant('{commonappdata}\RentDeviceAgent\unbound.flag'));
+  // A never-bound installation has no state.json and may be removed directly.
+  Result := (not FileExists(ExpandConstant('{commonappdata}\RentDeviceAgent\state.json'))) or
+    FileExists(ExpandConstant('{commonappdata}\RentDeviceAgent\unbound.flag'));
   if not Result then
     MsgBox('请先在网站“绑定设备”页面解绑此设备。解绑成功后，客户端界面显示“设备未绑定”，才能卸载。', mbError, MB_OK);
 end;
@@ -82,10 +84,10 @@ Filename: "sc.exe"; Parameters: "delete RentDeviceAgent"; Flags: runhidden waitu
 [UninstallDelete]
 Type: filesandordirs; Name: "{commonappdata}\RentDeviceAgent"
 
-[Icons]
-Name: "{autodesktop}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
-Name: "{group}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
-
 [Registry]
 ; HKLM Run applies to every Windows user who signs in, not only the administrator who installed it.
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "PC Rental Device Agent UI"; ValueData: "{app}\RentDeviceAgent.exe"; Flags: uninsdeletevalue
+
+[Icons]
+Name: "{autodesktop}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
+Name: "{group}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
