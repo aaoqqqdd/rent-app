@@ -22,6 +22,7 @@ public sealed class AgentWorker : BackgroundService
     private string _statusText = "正在连接";
     private JsonElement? _rental;
     private DateTime _lastUpdateCheck = DateTime.MinValue;
+    private int _consecutiveFailures;
 
     public AgentWorker(IHttpClientFactory httpClientFactory, IOptions<AgentOptions> options, ILogger<AgentWorker> logger)
     {
@@ -47,13 +48,18 @@ public sealed class AgentWorker : BackgroundService
                     await ReadStateAsync(stoppingToken);
                     await CheckForUpdateAsync(stoppingToken);
                 }
+                _consecutiveFailures = 0;
             }
             catch (Exception ex)
             {
+                _consecutiveFailures = Math.Min(_consecutiveFailures + 1, 6);
                 _logger.LogWarning(ex, "Rent device agent sync failed; will retry");
             }
 
-            var seconds = Math.Clamp(_options.HeartbeatIntervalSeconds, 30, 3600);
+            var baseSeconds = Math.Clamp(_options.HeartbeatIntervalSeconds, 30, 3600);
+            var seconds = _consecutiveFailures == 0
+                ? baseSeconds
+                : Math.Min(300, Math.Max(5, 5 * (1 << Math.Min(_consecutiveFailures - 1, 5))));
             try { await Task.Delay(TimeSpan.FromSeconds(seconds), stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         }
@@ -115,6 +121,8 @@ public sealed class AgentWorker : BackgroundService
         response.EnsureSuccessStatusCode();
         var state = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
         if (state.TryGetProperty("rental", out var rental)) _rental = rental;
+        if (state.TryGetProperty("serverTime", out var serverTime))
+            _trustedServerTime = serverTime.ToString();
         _statusText = "已连接";
         var memory = ReadMemoryMb() / 1024d;
         var storage = new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;
@@ -122,6 +130,7 @@ public sealed class AgentWorker : BackgroundService
         var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
         var rentalStarted = _rental.HasValue && string.Equals(_rental.Value.GetProperty("status").ToString(), "active", StringComparison.OrdinalIgnoreCase) && DateTime.TryParse(startDate, out var rentalStart) && rentalStart.Date <= DateTime.Now.Date;
         await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json"), JsonSerializer.Serialize(new { Status = _statusText, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, ProtocolRequired = rentalStarted, Version = _options.Version, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }), cancellationToken);
+        SaveState();
         if (state.TryGetProperty("cleanupRequested", out var cleanup) && cleanup.GetBoolean()) await CleanupNonAdminProfilesAsync(cancellationToken);
         _logger.LogDebug("Current device state: {State}", state.ToString());
     }
@@ -220,14 +229,17 @@ public sealed class AgentWorker : BackgroundService
         {
             var encrypted = Convert.FromBase64String(File.ReadAllText(_statePath));
             var plaintext = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.LocalMachine);
-            _token = JsonSerializer.Deserialize<State>(plaintext)?.Token;
+            var state = JsonSerializer.Deserialize<State>(plaintext);
+            _token = state?.Token;
+            _trustedServerTime = state?.TrustedServerTime;
+            if (!string.IsNullOrWhiteSpace(state?.RentalJson)) _rental = JsonSerializer.Deserialize<JsonElement>(state.RentalJson);
         }
         catch { _token = null; }
     }
 
     private void SaveState()
     {
-        var plaintext = JsonSerializer.SerializeToUtf8Bytes(new State(_token));
+        var plaintext = JsonSerializer.SerializeToUtf8Bytes(new State(_token, _trustedServerTime, _rental?.ToString()));
         var encrypted = ProtectedData.Protect(plaintext, null, DataProtectionScope.LocalMachine);
         File.WriteAllText(_statePath, Convert.ToBase64String(encrypted));
     }
@@ -248,7 +260,8 @@ public sealed class AgentWorker : BackgroundService
         return long.TryParse(value, out var bytes) ? bytes / (1024 * 1024) : null;
     }
 
-    private sealed record State(string? Token);
+    private string? _trustedServerTime;
+    private sealed record State(string? Token, string? TrustedServerTime, string? RentalJson);
     private sealed record RegisterResponse(bool Ok, string DeviceId, string SerialNumber, string Token);
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
     private sealed record UpdateInfo(string Version, string DownloadUrl);
