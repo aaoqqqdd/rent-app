@@ -20,6 +20,9 @@ ArchitecturesInstallIn64BitMode=x64
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\RentDeviceAgent.exe
 
+[Languages]
+Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+
 [Files]
 Source: "publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "install-service.ps1"; DestDir: "{app}"; Flags: ignoreversion
