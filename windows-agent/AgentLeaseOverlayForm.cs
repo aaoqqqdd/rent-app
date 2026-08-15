@@ -7,6 +7,7 @@ public sealed class AgentLeaseOverlayForm : Form
     private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "PC Rental 设备管理" };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15000 };
     private ToolStripMenuItem? _toggleOverlay;
+    private Button? _bindButton;
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 
     public AgentLeaseOverlayForm()
@@ -30,6 +31,7 @@ public sealed class AgentLeaseOverlayForm : Form
         var open = new Button { Text = "打开完整界面", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(37, 99, 235), Location = new Point(18, 68) };
         open.Click += (_, _) => { using var form = new AgentDashboardForm(); form.ShowDialog(this); };
         var bind = new Button { Text = "手动绑定", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(35, 58, 78), Location = new Point(145, 68) };
+        _bindButton = bind;
         bind.Click += (_, _) =>
         {
             using var form = new AgentBindingForm();
@@ -37,6 +39,7 @@ public sealed class AgentLeaseOverlayForm : Form
             // Binding restarts the service. Read the new dashboard immediately instead of
             // waiting for the 15-second overlay timer.
             RefreshSnapshot();
+            if (_bindButton is not null) _bindButton.Visible = !IsBound();
         };
         Controls.AddRange([title, _lease, open, bind]);
         var windowMenu = new ContextMenuStrip();
@@ -74,8 +77,10 @@ public sealed class AgentLeaseOverlayForm : Form
             {
                 _lease.Text = "设备未绑定";
                 _tray.Text = "PC Rental 设备管理 · 设备未绑定";
+                if (_bindButton is not null) _bindButton.Visible = true;
                 return;
             }
+            if (_bindButton is not null) _bindButton.Visible = false;
             if (data.ProtocolRequired && !AgentSoftwareAgreementForm.IsAccepted(data.StartDate ?? "current"))
             {
                 Hide();

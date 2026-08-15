@@ -103,7 +103,7 @@ public sealed class AgentWorker : BackgroundService
         _bindingRevoked = false;
         File.Delete(_unboundPath);
         WriteAgentLog($"绑定成功：设备 ID={_deviceId}，网站序列号={_registeredSerialNumber}，本机序列号={_detectedSerialNumber}");
-        WriteDashboardSnapshot("已绑定，正在同步网站状态", null, null);
+        WriteDashboardSnapshot("已绑定，正在同步网站状态", null, null, false, ReadMemoryMb() / 1024d, GetStorageGb());
         _logger.LogInformation("Device registered as {DeviceId}", result.DeviceId);
     }
 
@@ -164,7 +164,7 @@ public sealed class AgentWorker : BackgroundService
         var startDate = _rental?.TryGetProperty("start_date", out var start) == true ? start.ToString() : null;
         var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
         var rentalStarted = _rental.HasValue && string.Equals(_rental.Value.GetProperty("status").ToString(), "active", StringComparison.OrdinalIgnoreCase) && DateTime.TryParse(startDate, out var rentalStart) && rentalStart.Date <= DateTime.Now.Date;
-        WriteDashboardSnapshot(_statusText, startDate, endDate, rentalStarted);
+        WriteDashboardSnapshot(_statusText, startDate, endDate, rentalStarted, memory, storage);
         SaveState();
         if (state.TryGetProperty("cleanupRequested", out var cleanup) && cleanup.GetBoolean()) await CleanupNonAdminProfilesAsync(cancellationToken);
         _logger.LogDebug("Current device state: {State}", state.ToString());
@@ -181,11 +181,13 @@ public sealed class AgentWorker : BackgroundService
         _logger.LogWarning("Device binding was revoked by the server; automatic re-registration is disabled until a new installation/binding.");
     }
 
-    private void WriteDashboardSnapshot(string status, string? startDate, string? endDate, bool protocolRequired = false)
+    private void WriteDashboardSnapshot(string status, string? startDate, string? endDate, bool protocolRequired, double? memoryGb, double? storageGb)
     {
         var dashboardPath = Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json");
-        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, ProtocolRequired = protocolRequired, Version = _options.Version, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
+        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, Version = _options.Version, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
     }
+
+    private static double GetStorageGb() => new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;
 
     private async Task CleanupNonAdminProfilesAsync(CancellationToken cancellationToken)
     {
