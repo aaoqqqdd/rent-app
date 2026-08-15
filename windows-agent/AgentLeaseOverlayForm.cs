@@ -30,7 +30,14 @@ public sealed class AgentLeaseOverlayForm : Form
         var open = new Button { Text = "打开完整界面", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(37, 99, 235), Location = new Point(18, 68) };
         open.Click += (_, _) => { using var form = new AgentDashboardForm(); form.ShowDialog(this); };
         var bind = new Button { Text = "手动绑定", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(35, 58, 78), Location = new Point(145, 68) };
-        bind.Click += (_, _) => { using var form = new AgentBindingForm(); form.ShowDialog(this); };
+        bind.Click += (_, _) =>
+        {
+            using var form = new AgentBindingForm();
+            form.ShowDialog(this);
+            // Binding restarts the service. Read the new dashboard immediately instead of
+            // waiting for the 15-second overlay timer.
+            RefreshSnapshot();
+        };
         Controls.AddRange([title, _lease, open, bind]);
         var windowMenu = new ContextMenuStrip();
         windowMenu.Items.Add("隐藏租期窗口", null, (_, _) => Hide());
