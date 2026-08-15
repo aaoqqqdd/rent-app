@@ -5,7 +5,7 @@ public sealed class AgentLeaseOverlayForm : Form
 {
     private readonly Label _lease = new() { AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI", 13, FontStyle.Bold) };
     private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "PC Rental 设备管理" };
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 5000 };
+    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15000 };
     private ToolStripMenuItem? _toggleOverlay;
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 

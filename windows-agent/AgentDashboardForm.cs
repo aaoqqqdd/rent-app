@@ -14,7 +14,7 @@ public sealed class AgentDashboardForm : Form
     private readonly Label _hardware = ValueLabel("—");
     private readonly Label _version = ValueLabel("—");
     private readonly Label _identity = ValueLabel("—");
-    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 3000 };
+    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 10000 };
     private readonly NotifyIcon _notify = new() { Icon = SystemIcons.Application, Visible = false, Text = "PC Rental 设备管理" };
     private string _customerPanelUrl = "";
     private bool _expiryNotified;

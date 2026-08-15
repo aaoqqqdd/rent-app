@@ -41,6 +41,7 @@ $binPath = '"' + $exe + '" --service'
 Invoke-Sc @('create', $serviceName, 'binPath=', $binPath, 'start=', 'auto', 'DisplayName=', 'PC Rental Device Agent')
 Invoke-Sc @('description', $serviceName, 'Connects this rental device to the Rent management website.')
 Invoke-Sc @('failure', $serviceName, 'reset=', '86400', 'actions=', 'restart/5000/restart/15000/restart/60000')
+Invoke-Sc @('failureflag', $serviceName, '1')
 # The service owns the device state; this per-user UI is restarted on every Windows login.
 # Closing the borderless overlay is already cancelled by the UI, while this startup entry
 # restores it after a normal logout/login cycle without granting the renter admin rights.
