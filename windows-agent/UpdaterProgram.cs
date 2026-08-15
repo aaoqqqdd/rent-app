@@ -9,8 +9,6 @@ var version = Get("--version");
 var source = Get("--source");
 var service = rawArgs.Any(x => x.Equals("--service", StringComparison.OrdinalIgnoreCase));
 if (string.IsNullOrWhiteSpace(pending) || string.IsNullOrWhiteSpace(target)) return;
-var choice = MessageBox.Show($"发现 PC Rental 设备管理新版本 {version}。\n\n更新来源：\n{source}\n\n是否现在安装？", "PC Rental 软件更新", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-if (choice != DialogResult.Yes) return;
 try
 {
     await Task.Delay(1500);
