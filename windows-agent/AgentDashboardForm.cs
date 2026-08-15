@@ -3,6 +3,7 @@ using System.Diagnostics;
 
 public sealed class AgentDashboardForm : Form
 {
+    private const string DefaultApiBaseUrl = "https://rent.ydnw6zt6vj.workers.dev";
     private static readonly Color Navy = Color.FromArgb(13, 27, 42);
     private static readonly Color Panel = Color.FromArgb(20, 39, 56);
     private static readonly Color Blue = Color.FromArgb(59, 130, 246);
@@ -15,7 +16,7 @@ public sealed class AgentDashboardForm : Form
     private readonly Label _version = ValueLabel("—");
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 10000 };
     private readonly NotifyIcon _notify = new() { Icon = SystemIcons.Application, Visible = false, Text = "PC Rental 设备管理" };
-    private string _customerPanelUrl = "";
+    private string _customerPanelUrl = $"{DefaultApiBaseUrl}/login";
     private bool _expiryNotified;
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 
@@ -66,14 +67,45 @@ public sealed class AgentDashboardForm : Form
     {
         try
         {
-            if (!File.Exists(SnapshotPath)) return; var data = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(SnapshotPath)); if (data is null) return;
-            _status.Text = data.Status; _deviceId.Text = data.DeviceId ?? "未绑定"; _rental.Text = data.EndDate is null ? "暂无租期" : $"开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate}"; _hardware.Text = $"内存 {data.MemoryGb:0.0} GB  ·  剩余存储 {data.StorageGb:0.0} GB"; _version.Text = $"版本 {data.Version}  ·  最后同步 {data.UpdatedAt:yyyy-MM-dd HH:mm:ss}"; _customerPanelUrl = data.ApiBaseUrl?.TrimEnd('/') + "/login";
+            if (!File.Exists(SnapshotPath))
+            {
+                _status.Text = "等待连接网站…";
+                _deviceId.Text = "等待绑定";
+                _rental.Text = "等待同步租期";
+                _hardware.Text = "等待设备信息";
+                _version.Text = "客户端已启动 · 尚未收到网站数据";
+                return;
+            }
+
+            var data = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(SnapshotPath));
+            if (data is null)
+            {
+                _status.Text = "网站数据为空";
+                return;
+            }
+
+            _status.Text = string.IsNullOrWhiteSpace(data.Status) ? "已连接，等待状态" : data.Status;
+            _deviceId.Text = data.DeviceId ?? "未绑定";
+            _rental.Text = data.EndDate is null ? "暂无租期" : $"开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate}";
+            _hardware.Text = $"内存 {data.MemoryGb:0.0} GB  ·  剩余存储 {data.StorageGb:0.0} GB";
+            _version.Text = $"版本 {data.Version}  ·  最后同步 {data.UpdatedAt:yyyy-MM-dd HH:mm:ss}";
+            if (!string.IsNullOrWhiteSpace(data.ApiBaseUrl)) _customerPanelUrl = $"{data.ApiBaseUrl.TrimEnd('/')}/login";
             if (!_expiryNotified && DateTime.TryParse(data.EndDate, out var endDate) && (endDate.Date - DateTime.Now.Date).TotalDays <= 3 && endDate.Date >= DateTime.Now.Date) { _notify.ShowBalloonTip(8000, "租期即将到期", $"设备租期将在 {endDate:yyyy-MM-dd} 到期。", ToolTipIcon.Warning); _expiryNotified = true; }
         }
-        catch { _status.Text = "暂时无法读取状态"; }
+        catch (Exception ex)
+        {
+            _status.Text = $"读取网站状态失败：{ex.Message}";
+            _deviceId.Text = "无法读取设备 ID";
+            _rental.Text = "无法读取租期";
+            _hardware.Text = "无法读取设备资源";
+        }
     }
 
-    private void OpenCustomerPanel() { if (!string.IsNullOrWhiteSpace(_customerPanelUrl)) Process.Start(new ProcessStartInfo(_customerPanelUrl) { UseShellExecute = true }); }
+    private void OpenCustomerPanel()
+    {
+        try { Process.Start(new ProcessStartInfo(_customerPanelUrl) { UseShellExecute = true }); }
+        catch (Exception ex) { MessageBox.Show($"无法打开客户面板：{ex.Message}", "PC Rental", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
     protected override void Dispose(bool disposing) { if (disposing) { _timer.Dispose(); _notify.Visible = false; _notify.Dispose(); } base.Dispose(disposing); }
     private static Label LabelFor(string text, float size = 15, FontStyle style = FontStyle.Regular) => new() { Text = text, AutoSize = true, Font = new Font("Microsoft YaHei UI", size, style), ForeColor = Color.White };
     private static Label ValueLabel(string text) => LabelFor(text, 14, FontStyle.Bold);
