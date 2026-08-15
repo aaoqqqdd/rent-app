@@ -96,3 +96,4 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Icons]
 Name: "{autodesktop}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
 Name: "{group}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
+Name: "{commonstartup}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"; WorkingDir: "{app}"
