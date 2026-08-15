@@ -1,0 +1,33 @@
+using System.Diagnostics;
+
+var rawArgs = Environment.GetCommandLineArgs();
+string Get(string name) => Array.FindIndex(rawArgs, x => x.Equals(name, StringComparison.OrdinalIgnoreCase)) is var i && i >= 0 && i + 1 < rawArgs.Length ? rawArgs[i + 1] : "";
+var pending = Get("--pending");
+var target = Get("--target");
+var version = Get("--version");
+var source = Get("--source");
+var service = rawArgs.Any(x => x.Equals("--service", StringComparison.OrdinalIgnoreCase));
+if (string.IsNullOrWhiteSpace(pending) || string.IsNullOrWhiteSpace(target)) return;
+var choice = MessageBox.Show($"发现 PC Rental 设备管理新版本 {version}。\n\n更新来源：\n{source}\n\n是否现在安装？", "PC Rental 软件更新", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+if (choice != DialogResult.Yes) return;
+try
+{
+    await Task.Delay(1500);
+    if (service)
+    {
+        using var stop = Process.Start(new ProcessStartInfo("sc.exe", "stop RentDeviceAgent") { CreateNoWindow = true, UseShellExecute = false });
+        stop?.WaitForExit(15000);
+        await Task.Delay(2500);
+    }
+    for (var i = 0; i < 15; i++)
+    {
+        try { File.Copy(pending, target, true); File.Delete(pending); break; }
+        catch when (i < 14) { await Task.Delay(1000); }
+    }
+    if (service) Process.Start(new ProcessStartInfo("sc.exe", "start RentDeviceAgent") { CreateNoWindow = true, UseShellExecute = false });
+    else Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+}
+catch (Exception ex)
+{
+    MessageBox.Show($"更新失败：{ex.Message}", "PC Rental 软件更新", MessageBoxButtons.OK, MessageBoxIcon.Error);
+}

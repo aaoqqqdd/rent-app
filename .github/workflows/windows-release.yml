@@ -91,6 +91,12 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x86 --self-contained false -p:SelfContained=false -p:PublishSingleFile=true -p:PublishTrimmed=false -p:Version=$env:RELEASE_VERSION -o windows-agent/publish-x86
 
+      - name: Publish independent updater
+        shell: pwsh
+        run: |
+          dotnet publish windows-agent/RentDeviceAgent.Updater.csproj -c Release -r win-x64 --self-contained false -p:SelfContained=false -p:PublishSingleFile=true -o windows-agent/updater-x64
+          dotnet publish windows-agent/RentDeviceAgent.Updater.csproj -c Release -r win-x86 --self-contained false -p:SelfContained=false -p:PublishSingleFile=true -o windows-agent/updater-x86
+
       - name: Stamp client version
         shell: pwsh
         env:
@@ -113,6 +119,9 @@ jobs:
           Copy-Item windows-agent/publish-x64/RentDeviceAgent.exe windows-agent/publish-x64/RentDeviceAgent-x64.exe
           Copy-Item windows-agent/publish-x86/RentDeviceAgent.exe windows-agent/publish-x86/RentDeviceAgent-x86.exe
           Copy-Item windows-agent/publish-x64 windows-agent/publish -Recurse -Force
+          Copy-Item windows-agent/updater-x64/RentDeviceAgent.Updater.exe windows-agent/publish-x64/RentDeviceAgent.Updater.exe -Force
+          Copy-Item windows-agent/updater-x86/RentDeviceAgent.Updater.exe windows-agent/publish-x86/RentDeviceAgent.Updater.exe -Force
+          Copy-Item windows-agent/updater-x64/RentDeviceAgent.Updater.exe windows-agent/publish/RentDeviceAgent.Updater.exe -Force
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress --yes

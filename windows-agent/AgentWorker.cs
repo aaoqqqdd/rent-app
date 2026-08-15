@@ -2,7 +2,6 @@ using System.Management;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Net;
 using System.Diagnostics;
@@ -144,7 +143,6 @@ public sealed class AgentWorker : BackgroundService
         if (heartbeatResult?.Ok != true) throw new InvalidOperationException("网站未确认心跳");
         WriteAgentLog($"心跳成功：HTTP {(int)response.StatusCode}，设备 ID={_deviceId}");
         var state = await response.Content.ReadFromJsonAsync<AgentState>(cancellationToken: cancellationToken);
-        if (state?.RemoteLockEnabled == true) LockWorkStation();
         if (!string.IsNullOrWhiteSpace(state?.DeviceMode)) _deviceMode = state.DeviceMode;
         _beforeSnapshotSent = true;
     }
@@ -166,7 +164,6 @@ public sealed class AgentWorker : BackgroundService
         var rentalStarted = _rental.HasValue && string.Equals(_rental.Value.GetProperty("status").ToString(), "active", StringComparison.OrdinalIgnoreCase) && DateTime.TryParse(startDate, out var rentalStart) && rentalStart.Date <= DateTime.Now.Date;
         WriteDashboardSnapshot(_statusText, startDate, endDate, rentalStarted, memory, storage);
         SaveState();
-        if (state.TryGetProperty("cleanupRequested", out var cleanup) && cleanup.GetBoolean()) await CleanupNonAdminProfilesAsync(cancellationToken);
         _logger.LogDebug("Current device state: {State}", state.ToString());
     }
 
@@ -188,61 +185,6 @@ public sealed class AgentWorker : BackgroundService
     }
 
     private static double GetStorageGb() => new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;
-
-    private async Task CleanupNonAdminProfilesAsync(CancellationToken cancellationToken)
-    {
-        var removed = new List<string>();
-        var skipped = new List<string>();
-        var errors = new List<string>();
-        try
-        {
-            foreach (var processName in new[] { "chrome", "msedge", "firefox", "微信", "WeChat", "WeChatApp" })
-                foreach (var process in Process.GetProcessesByName(processName)) try { process.Kill(true); } catch { }
-            var administrators = GetAdministratorNames();
-            var usersRoot = Path.Combine(Environment.GetEnvironmentVariable("SystemDrive") ?? "C:", "Users");
-            foreach (var profile in Directory.Exists(usersRoot) ? Directory.GetDirectories(usersRoot) : Array.Empty<string>())
-            {
-                var name = Path.GetFileName(profile.TrimEnd(Path.DirectorySeparatorChar));
-                if (string.IsNullOrWhiteSpace(name) || new[] { "Public", "Default", "Default User", "All Users" }.Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
-                if (administrators.Contains(name, StringComparer.OrdinalIgnoreCase)) { skipped.Add(name); continue; }
-                foreach (var target in new[] {
-                    Path.Combine(profile, "Downloads"),
-                    Path.Combine(profile, "AppData", "Local", "Google", "Chrome", "User Data"),
-                    Path.Combine(profile, "AppData", "Local", "Microsoft", "Edge", "User Data"),
-                    Path.Combine(profile, "AppData", "Roaming", "Mozilla", "Firefox"),
-                    Path.Combine(profile, "AppData", "Roaming", "Tencent", "WeChat"),
-                    Path.Combine(profile, "Documents", "WeChat Files")
-                })
-                {
-                    if (!Directory.Exists(target)) continue;
-                    try { Directory.Delete(target, true); removed.Add(target); } catch (Exception error) { errors.Add($"{target}: {error.Message}"); }
-                }
-            }
-        }
-        catch (Exception error) { errors.Add(error.Message); }
-        using var response = await AuthenticatedClient().PostAsJsonAsync(Url("/api/device-agent/cleanup-result"), new { ok = errors.Count == 0, removed, skipped, errors }, cancellationToken);
-        response.EnsureSuccessStatusCode();
-    }
-
-    private static HashSet<string> GetAdministratorNames()
-    {
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Administrator", "admin" };
-        try
-        {
-            using var groupSearcher = new ManagementObjectSearcher("SELECT __PATH FROM Win32_Group WHERE SID = 'S-1-5-32-544'");
-            var group = groupSearcher.Get().Cast<ManagementObject>().FirstOrDefault();
-            var groupPath = group?["__PATH"]?.ToString();
-            if (string.IsNullOrWhiteSpace(groupPath)) return names;
-            using var memberSearcher = new ManagementObjectSearcher($"ASSOCIATORS OF {{{groupPath}}} WHERE AssocClass=Win32_GroupUser Role=GroupComponent");
-            foreach (ManagementObject item in memberSearcher.Get())
-            {
-                var accountName = item["Name"]?.ToString();
-                if (!string.IsNullOrWhiteSpace(accountName)) names.Add(accountName);
-            }
-        }
-        catch { }
-        return names;
-    }
 
     private async Task CheckForUpdateAsync(CancellationToken cancellationToken)
     {
@@ -274,13 +216,12 @@ public sealed class AgentWorker : BackgroundService
                 if (header.ReadByte() != 'M' || header.ReadByte() != 'Z')
                     throw new InvalidOperationException("下载内容不是 Windows EXE 文件");
             }
-            var script = Path.Combine(Path.GetTempPath(), "RentDeviceAgent-update.ps1");
             var processPath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "RentDeviceAgent.exe");
             var isService = Environment.GetCommandLineArgs().Any(arg => string.Equals(arg, "--service", StringComparison.OrdinalIgnoreCase));
-            var updater = $"param([string]$Pending,[string]$Target,[switch]$Service)\n$ErrorActionPreference = 'Stop'\nStart-Sleep -Seconds 4\nif ($Service) {{ & \"$env:SystemRoot\\System32\\sc.exe\" stop RentDeviceAgent | Out-Null; Start-Sleep -Seconds 3 }}\nfor ($i = 0; $i -lt 12; $i++) {{ try {{ Move-Item -Force -LiteralPath $Pending -Destination $Target; break }} catch {{ if ($i -eq 11) {{ throw }}; Start-Sleep -Seconds 2 }} }}\nif ($Service) {{ & \"$env:SystemRoot\\System32\\sc.exe\" start RentDeviceAgent | Out-Null }} else {{ Start-Process -FilePath $Target }}\n";
-            await File.WriteAllTextAsync(script, updater, cancellationToken);
-            var args = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Pending \"{pending}\" -Target \"{processPath}\"" + (isService ? " -Service" : "");
-            Process.Start(new ProcessStartInfo("powershell.exe", args) { CreateNoWindow = true, UseShellExecute = false });
+            var updaterPath = Path.Combine(AppContext.BaseDirectory, "RentDeviceAgent.Updater.exe");
+            if (!File.Exists(updaterPath)) throw new InvalidOperationException("找不到独立更新器，请重新安装客户端");
+            var updaterArgs = $"--pending \"{pending}\" --target \"{processPath}\" --version \"{version}\" --source \"https://github.com/{_options.GitHubRepository}/releases/tag/v{version}\"" + (isService ? " --service" : "");
+            Process.Start(new ProcessStartInfo(updaterPath, updaterArgs) { CreateNoWindow = false, UseShellExecute = true });
             _statusText = $"发现新版本 {version}，正在更新";
             Environment.Exit(0);
         }
@@ -373,6 +314,4 @@ public sealed class AgentWorker : BackgroundService
     private sealed record GitHubRelease(string TagName, GitHubAsset[]? Assets);
     private sealed record GitHubAsset(string Name, string BrowserDownloadUrl);
 
-    [DllImport("user32.dll")]
-    private static extern bool LockWorkStation();
 }
