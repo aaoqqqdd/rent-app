@@ -35,10 +35,18 @@ IHost? localHost = null;
 if (!IsAgentServiceRunning())
 {
     localHost = CreateAgentHost(args);
-    await localHost.StartAsync();
 }
 
-Application.Run(new AgentLeaseOverlayForm());
+var overlay = new AgentLeaseOverlayForm();
+if (localHost is not null)
+{
+    overlay.Shown += async (_, _) =>
+    {
+        try { await localHost.StartAsync(); }
+        catch { }
+    };
+}
+Application.Run(overlay);
 if (localHost is not null)
 {
     await localHost.StopAsync();
