@@ -22,7 +22,7 @@ public sealed class AgentSoftwareAgreementForm : Form
 
     public AgentSoftwareAgreementForm()
     {
-        Text = "Rent Device Agent · 软件使用协议";
+        Text = "PC Rental Device Agent · 软件使用协议";
         Width = 720; Height = 560; StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
         TopMost = true; BackColor = Color.FromArgb(16, 24, 32); ForeColor = Color.White;

@@ -49,7 +49,7 @@ build-installer.ps1 `
 
 ## 卸载
 
-在 Windows“应用和功能”中卸载 Rent Device Agent。卸载前请确认设备仍可由管理员在网站后台管理。
+在 Windows“应用和功能”中卸载 PC Rental Device Agent。卸载前请确认设备仍可由管理员在网站后台管理。
 
 ## 安全说明
 

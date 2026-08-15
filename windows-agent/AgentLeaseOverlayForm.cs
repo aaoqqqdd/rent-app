@@ -4,14 +4,14 @@ using System.Text.Json;
 public sealed class AgentLeaseOverlayForm : Form
 {
     private readonly Label _lease = new() { AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI", 13, FontStyle.Bold) };
-    private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "Rent 设备管理" };
+    private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "PC Rental 设备管理" };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 5000 };
     private ToolStripMenuItem? _toggleOverlay;
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 
     public AgentLeaseOverlayForm()
     {
-        Text = "Rent 设备管理";
+        Text = "PC Rental 设备管理";
         Width = 330;
         Height = 145;
         FormBorderStyle = FormBorderStyle.None;
@@ -23,11 +23,13 @@ public sealed class AgentLeaseOverlayForm : Form
         BackColor = Color.FromArgb(24, 40, 50);
         Padding = new Padding(18);
 
-        var title = new Label { Text = "Rent Device Agent", AutoSize = true, ForeColor = Color.FromArgb(113, 224, 181), Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(18, 12) };
+        var title = new Label { Text = "PC Rental Device Agent", AutoSize = true, ForeColor = Color.FromArgb(113, 224, 181), Font = new Font("Segoe UI", 10, FontStyle.Bold), Location = new Point(18, 12) };
         _lease.Location = new Point(18, 36);
         var open = new Button { Text = "打开完整界面", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(37, 99, 235), Location = new Point(18, 68) };
         open.Click += (_, _) => { using var form = new AgentDashboardForm(); form.ShowDialog(this); };
-        Controls.AddRange([title, _lease, open]);
+        var bind = new Button { Text = "手动绑定", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(35, 58, 78), Location = new Point(145, 68) };
+        bind.Click += (_, _) => { using var form = new AgentBindingForm(); form.ShowDialog(this); };
+        Controls.AddRange([title, _lease, open, bind]);
         var windowMenu = new ContextMenuStrip();
         windowMenu.Items.Add("隐藏租期窗口", null, (_, _) => Hide());
         windowMenu.Items.Add("打开完整界面", null, (_, _) => open.PerformClick());
@@ -38,6 +40,7 @@ public sealed class AgentLeaseOverlayForm : Form
         _toggleOverlay.Click += (_, _) => ToggleOverlay();
         _tray.ContextMenuStrip.Items.Add(_toggleOverlay);
         _tray.ContextMenuStrip.Items.Add("打开完整界面", null, (_, _) => open.PerformClick());
+        _tray.ContextMenuStrip.Items.Add("手动绑定设备", null, (_, _) => bind.PerformClick());
         _tray.DoubleClick += (_, _) => { Show(); Activate(); };
         FormClosing += (_, e) => e.Cancel = true;
         _timer.Tick += (_, _) => RefreshSnapshot();
@@ -55,13 +58,13 @@ public sealed class AgentLeaseOverlayForm : Form
     {
         try
         {
-            if (!File.Exists(SnapshotPath)) { _lease.Text = "租期：等待设备连接"; _tray.Text = "Rent 设备管理 · 等待设备连接"; return; }
+            if (!File.Exists(SnapshotPath)) { _lease.Text = "租期：等待设备连接"; _tray.Text = "PC Rental 设备管理 · 等待设备连接"; return; }
             var data = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(SnapshotPath));
             if (data is null) return;
             if (string.Equals(data.BindingStatus, "unbound", StringComparison.OrdinalIgnoreCase))
             {
                 _lease.Text = "设备未绑定";
-                _tray.Text = "Rent 设备管理 · 设备未绑定";
+                _tray.Text = "PC Rental 设备管理 · 设备未绑定";
                 return;
             }
             if (data.ProtocolRequired && !AgentSoftwareAgreementForm.IsAccepted(data.StartDate ?? "current"))
@@ -71,7 +74,7 @@ public sealed class AgentLeaseOverlayForm : Form
                 return;
             }
             _lease.Text = $"到期：{data.EndDate ?? "暂无租期"}";
-            _tray.Text = $"Rent 设备管理 · 到期：{data.EndDate ?? "暂无租期"}";
+            _tray.Text = $"PC Rental 设备管理 · 到期：{data.EndDate ?? "暂无租期"}";
         }
         catch { _lease.Text = "租期：暂时无法读取"; }
     }

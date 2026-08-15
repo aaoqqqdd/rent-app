@@ -68,13 +68,13 @@ jobs:
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:Version=$env:RELEASE_VERSION -o windows-agent/publish-x64
+        run: dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$env:RELEASE_VERSION -o windows-agent/publish-x64
 
       - name: Publish x86 executable
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x86 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:Version=$env:RELEASE_VERSION -o windows-agent/publish-x86
+        run: dotnet publish windows-agent/RentDeviceAgent.csproj -c Release -r win-x86 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$env:RELEASE_VERSION -o windows-agent/publish-x86
 
       - name: Stamp client version
         shell: pwsh

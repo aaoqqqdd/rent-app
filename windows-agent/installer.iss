@@ -1,8 +1,8 @@
-#define AppName "Rent 设备管理"
+#define AppName "PC Rental 设备管理"
 #ifndef AppVersion
   #define AppVersion "0.6.2"
 #endif
-#define AppPublisher "Rent"
+#define AppPublisher "PC Rental"
 #define AppExeName "RentDeviceAgent.exe"
 
 [Setup]
@@ -83,6 +83,9 @@ Filename: "sc.exe"; Parameters: "delete RentDeviceAgent"; Flags: runhidden waitu
 Type: filesandordirs; Name: "{commonappdata}\RentDeviceAgent"
 
 [Icons]
-Name: "{autodesktop}\Rent 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
-Name: "{group}\Rent 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
-Name: "{userstartup}\Rent 设备管理"; Filename: "{app}\RentDeviceAgent.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
+Name: "{group}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
+
+[Registry]
+; HKLM Run applies to every Windows user who signs in, not only the administrator who installed it.
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "PC Rental Device Agent UI"; ValueData: "{app}\RentDeviceAgent.exe"; Flags: uninsdeletevalue
