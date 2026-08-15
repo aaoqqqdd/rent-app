@@ -176,8 +176,11 @@ public sealed class AgentWorker : BackgroundService
         response.EnsureSuccessStatusCode();
     }
 
-    private object BuildInspectionSnapshot() => new
+    private object BuildInspectionSnapshot()
     {
+        var battery = ReadBatteryInfo();
+        return new
+        {
         hostname = Environment.MachineName,
         osVersion = Environment.OSVersion.VersionString,
         cpu = ReadWmiValue("Win32_Processor", "Name"),
@@ -190,8 +193,11 @@ public sealed class AgentWorker : BackgroundService
         body = "需人工目检",
         camera = HasWmiDevice("SELECT Name FROM Win32_PnPEntity WHERE Name LIKE '%Camera%' OR Name LIKE '%Webcam%'") ? "已识别" : "未识别",
         wifi = HasWmiDevice("SELECT Name FROM Win32_NetworkAdapter WHERE NetEnabled = TRUE AND (Name LIKE '%Wi-Fi%' OR Name LIKE '%Wireless%')") ? "已连接" : "未连接",
-        power = "通过（客户端正在运行）"
-    };
+        power = "通过（客户端正在运行）",
+        batteryCycles = battery.Cycles,
+        batteryHealth = battery.Health
+        };
+    }
 
     private async Task ReadStateAsync(CancellationToken cancellationToken)
     {
@@ -199,7 +205,8 @@ public sealed class AgentWorker : BackgroundService
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); WriteAgentLog("网站已解绑本机，已立即切换为未绑定状态"); return; }
         response.EnsureSuccessStatusCode();
         var state = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cancellationToken);
-        if (state.TryGetProperty("rental", out var rental)) _rental = rental;
+        if (state.TryGetProperty("rental", out var rental))
+            _rental = rental.ValueKind == JsonValueKind.Object ? rental : null;
         if (state.TryGetProperty("serverTime", out var serverTime))
             _trustedServerTime = serverTime.ToString();
         if (state.TryGetProperty("inspectionRequested", out var inspectionRequested) && inspectionRequested.ValueKind == JsonValueKind.True)
@@ -370,6 +377,30 @@ public sealed class AgentWorker : BackgroundService
         return fallback > 0 ? fallback / (1024 * 1024) : null;
     }
 
+    private static BatteryInfo ReadBatteryInfo()
+    {
+        var cycles = ReadWmiNamespaceUInt("root\\WMI", "SELECT CycleCount FROM BatteryCycleCount", "CycleCount");
+        var fullCapacity = ReadWmiNamespaceUInt("root\\WMI", "SELECT FullChargedCapacity FROM BatteryFullChargedCapacity", "FullChargedCapacity");
+        var designCapacity = ReadWmiNamespaceUInt("root\\WMI", "SELECT DesignedCapacity FROM BatteryStaticData", "DesignedCapacity");
+        var health = fullCapacity is > 0 && designCapacity is > 0
+            ? $"{Math.Clamp((int)Math.Round(fullCapacity.Value * 100d / designCapacity.Value), 0, 100)}%"
+            : null;
+        return new BatteryInfo(cycles, health);
+    }
+
+    private static int? ReadWmiNamespaceUInt(string scopePath, string query, string property)
+    {
+        try
+        {
+            var scope = new ManagementScope($"\\\\.\\{scopePath}");
+            scope.Connect();
+            using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery(query));
+            var value = searcher.Get().Cast<ManagementObject>().FirstOrDefault()?[property];
+            return value is null ? null : Convert.ToInt32(value);
+        }
+        catch { return null; }
+    }
+
     private static void WriteAgentLog(string message)
     {
         try
@@ -383,6 +414,7 @@ public sealed class AgentWorker : BackgroundService
 
     private string? _trustedServerTime;
     private sealed record State(string? Token, string? TrustedServerTime, string? RentalJson, string? DeviceId = null, string? RegisteredSerialNumber = null, string? DetectedSerialNumber = null);
+    private sealed record BatteryInfo(int? Cycles, string? Health);
     private sealed record RegisterResponse(bool Ok, string DeviceId, string SerialNumber, string Token);
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
     private sealed record GitHubRelease(string TagName, GitHubAsset[]? Assets);
