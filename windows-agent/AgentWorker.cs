@@ -65,7 +65,8 @@ public sealed class AgentWorker : BackgroundService
                 WriteAgentLog($"同步失败：{ex.GetType().Name}: {ex.Message}");
             }
 
-            var baseSeconds = Math.Clamp(_options.HeartbeatIntervalSeconds, 30, 3600);
+            // Keep the website roster responsive while still avoiding a tight loop.
+            var baseSeconds = Math.Clamp(_options.HeartbeatIntervalSeconds, 10, 3600);
             var seconds = _consecutiveFailures == 0
                 ? baseSeconds
                 : Math.Min(300, Math.Max(5, 5 * (1 << Math.Min(_consecutiveFailures - 1, 5))));
@@ -139,6 +140,8 @@ public sealed class AgentWorker : BackgroundService
         using var response = await client.PostAsJsonAsync(Url("/api/device-agent/heartbeat"), payload, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); return; }
         response.EnsureSuccessStatusCode();
+        var heartbeatResult = await response.Content.ReadFromJsonAsync<HeartbeatResponse>(cancellationToken: cancellationToken);
+        if (heartbeatResult?.Ok != true) throw new InvalidOperationException("网站未确认心跳");
         WriteAgentLog($"心跳成功：HTTP {(int)response.StatusCode}，设备 ID={_deviceId}");
         var state = await response.Content.ReadFromJsonAsync<AgentState>(cancellationToken: cancellationToken);
         if (state?.RemoteLockEnabled == true) LockWorkStation();
@@ -352,6 +355,7 @@ public sealed class AgentWorker : BackgroundService
     private string? _trustedServerTime;
     private sealed record State(string? Token, string? TrustedServerTime, string? RentalJson, string? DeviceId = null, string? RegisteredSerialNumber = null, string? DetectedSerialNumber = null);
     private sealed record RegisterResponse(bool Ok, string DeviceId, string SerialNumber, string Token);
+    private sealed record HeartbeatResponse(bool Ok);
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
     private sealed record GitHubRelease(string TagName, GitHubAsset[]? Assets);
     private sealed record GitHubAsset(string Name, string BrowserDownloadUrl);
