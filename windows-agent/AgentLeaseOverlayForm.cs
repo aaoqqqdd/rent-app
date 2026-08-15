@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Win32;
 
 public sealed class AgentLeaseOverlayForm : Form
 {
@@ -7,6 +8,7 @@ public sealed class AgentLeaseOverlayForm : Form
     private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "PC Rental 设备管理" };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15000 };
     private ToolStripMenuItem? _toggleOverlay;
+    private ToolStripMenuItem? _bindMenuItem;
     private Button? _bindButton;
     private DateTime? _endDate;
     private DateTime? _serverDate;
@@ -16,7 +18,7 @@ public sealed class AgentLeaseOverlayForm : Form
     {
         Text = "PC Rental 设备管理";
         Width = 330;
-        Height = 165;
+        Height = 145;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = false;
@@ -30,9 +32,7 @@ public sealed class AgentLeaseOverlayForm : Form
 
         var title = new Label { Text = "PC Rental Device Agent", AutoSize = true, ForeColor = Color.FromArgb(113, 224, 181), Font = new Font("Microsoft YaHei UI", 10, FontStyle.Bold), Location = new Point(18, 12) };
         _lease.Location = new Point(18, 36);
-        var open = new Button { Text = "打开完整界面", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(37, 99, 235), Location = new Point(18, 68) };
-        open.Click += (_, _) => { using var form = new AgentDashboardForm(); form.ShowDialog(this); };
-        var bind = new Button { Text = "手动绑定", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(35, 58, 78), Location = new Point(145, 68) };
+        var bind = new Button { Text = "手动绑定", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.White, BackColor = Color.FromArgb(35, 58, 78), Location = new Point(18, 68) };
         _bindButton = bind;
         bind.Click += (_, _) =>
         {
@@ -43,21 +43,29 @@ public sealed class AgentLeaseOverlayForm : Form
             RefreshSnapshot();
             if (_bindButton is not null) _bindButton.Visible = !IsBound();
         };
-        Controls.AddRange([title, _lease, open, bind]);
+        Controls.AddRange([title, _lease, bind]);
+        Click += (_, _) => ShowMainPanel();
+        foreach (Control control in Controls)
+        {
+            if (control != bind) control.Click += (_, _) => ShowMainPanel();
+        }
         var windowMenu = new ContextMenuStrip();
         windowMenu.Items.Add("隐藏租期窗口", null, (_, _) => Hide());
-        windowMenu.Items.Add("打开完整界面", null, (_, _) => open.PerformClick());
+        windowMenu.Items.Add("打开完整界面", null, (_, _) => ShowMainPanel());
         ContextMenuStrip = windowMenu;
         foreach (Control control in Controls) control.ContextMenuStrip = windowMenu;
         _tray.ContextMenuStrip = new ContextMenuStrip();
         _toggleOverlay = new ToolStripMenuItem("隐藏租期窗口");
         _toggleOverlay.Click += (_, _) => ToggleOverlay();
         _tray.ContextMenuStrip.Items.Add(_toggleOverlay);
-        _tray.ContextMenuStrip.Items.Add("打开完整界面", null, (_, _) => open.PerformClick());
-        _tray.ContextMenuStrip.Items.Add("手动绑定设备", null, (_, _) => bind.PerformClick());
+        _tray.ContextMenuStrip.Items.Add("打开完整界面", null, (_, _) => ShowMainPanel());
+        _bindMenuItem = new ToolStripMenuItem("手动绑定设备");
+        _bindMenuItem.Click += (_, _) => bind.PerformClick();
+        _tray.ContextMenuStrip.Items.Add(_bindMenuItem);
         _tray.DoubleClick += (_, _) => { Show(); Activate(); };
         FormClosing += (_, e) => e.Cancel = IsBound();
         _timer.Tick += (_, _) => RefreshSnapshot();
+        EnsureUserStartupEntry();
         _timer.Start();
         RefreshSnapshot();
     }
@@ -66,6 +74,13 @@ public sealed class AgentLeaseOverlayForm : Form
     {
         if (Visible) Hide(); else { Show(); Activate(); }
         if (_toggleOverlay is not null) _toggleOverlay.Text = Visible ? "隐藏租期窗口" : "显示租期窗口";
+    }
+
+    private void ShowMainPanel()
+    {
+        Hide();
+        using var form = new AgentDashboardForm();
+        form.ShowDialog(this);
     }
 
     private void RefreshSnapshot()
@@ -81,9 +96,11 @@ public sealed class AgentLeaseOverlayForm : Form
                 _lease.Text = "设备未绑定";
                 _tray.Text = "PC Rental 设备管理 · 设备未绑定";
                 if (_bindButton is not null) _bindButton.Visible = true;
+                if (_bindMenuItem is not null) _bindMenuItem.Visible = true;
                 return;
             }
             if (_bindButton is not null) _bindButton.Visible = false;
+            if (_bindMenuItem is not null) _bindMenuItem.Visible = false;
             var rentalKey = data.RentalId ?? data.StartDate ?? "current";
             if (data.ProtocolRequired && !AgentSoftwareAgreementForm.IsAccepted(rentalKey))
             {
@@ -96,6 +113,17 @@ public sealed class AgentLeaseOverlayForm : Form
             ShowExpiry();
         }
         catch { _lease.Text = "租期：暂时无法读取"; }
+    }
+
+    private static void EnsureUserStartupEntry()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)
+                ?? Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+            key?.SetValue("PC Rental Device Agent UI", $"\"{Application.ExecutablePath}\" --ui");
+        }
+        catch { }
     }
 
     private static bool IsBound()

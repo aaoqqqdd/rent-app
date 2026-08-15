@@ -75,7 +75,7 @@ Invoke-Sc @('failureflag', $serviceName, '1')
 # Closing the borderless overlay is already cancelled by the UI, while this startup entry
 # restores it after a normal logout/login cycle without granting the renter admin rights.
 $runKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-New-ItemProperty -Path $runKey -Name "PC Rental Device Agent UI" -Value "`"$exe`"" -PropertyType String -Force | Out-Null
+New-ItemProperty -Path $runKey -Name "PC Rental Device Agent UI" -Value "`"$exe`" --ui" -PropertyType String -Force | Out-Null
 # Older installers also created a Startup-folder shortcut, which launched a duplicate UI.
 $legacyStartupShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonStartup)) "PC Rental 设备管理.lnk"
 Remove-Item $legacyStartupShortcut -Force -ErrorAction SilentlyContinue

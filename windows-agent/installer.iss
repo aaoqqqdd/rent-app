@@ -94,7 +94,7 @@ Type: filesandordirs; Name: "{commonappdata}\RentDeviceAgent"
 
 [Registry]
 ; HKLM Run applies to every Windows user who signs in, not only the administrator who installed it.
-Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "PC Rental Device Agent UI"; ValueData: "{app}\RentDeviceAgent.exe"; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "PC Rental Device Agent UI"; ValueData: "{app}\RentDeviceAgent.exe" --ui; Flags: uninsdeletevalue
 
 [Icons]
 Name: "{autodesktop}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
