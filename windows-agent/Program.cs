@@ -31,6 +31,8 @@ if (args.Contains("--service", StringComparer.OrdinalIgnoreCase))
 }
 
 ApplicationConfiguration.Initialize();
+using var uiMutex = new Mutex(true, "Local\\RentDeviceAgent.UI", out var isFirstUiInstance);
+if (!isFirstUiInstance) return;
 IHost? localHost = null;
 if (!IsAgentServiceRunning())
 {

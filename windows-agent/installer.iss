@@ -1,6 +1,6 @@
 #define AppName "PC Rental 设备管理"
 #ifndef AppVersion
-  #define AppVersion "0.11.20"
+  #define AppVersion "0.11.21"
 #endif
 #define AppPublisher "PC Rental"
 #define AppExeName "RentDeviceAgent.exe"
@@ -32,17 +32,27 @@ Source: "logo.svg"; DestDir: "{app}"; Flags: ignoreversion
 [Code]
 var
   CodePage: TInputQueryWizardPage;
+  UpdatePage: TOutputMsgWizardPage;
+  ExistingInstallation: Boolean;
 
 procedure InitializeWizard;
 begin
+  ExistingInstallation := FileExists(ExpandConstant('{autopf}\RentDeviceAgent\RentDeviceAgent.exe'));
   CodePage := CreateInputQueryPage(wpSelectDir, '设备绑定', '设备绑定方式', '客户端会先读取 BIOS 序列号自动绑定；如果网站没有相同序列号，请填写管理员生成的 6 位访问码。');
   CodePage.Add('6 位访问码（自动绑定时可留空）:', False);
+  UpdatePage := CreateOutputMsgPage(wpSelectDir, '更新 Windows 客户端', '检测到已安装的客户端', '本次将更新程序并保留现有设备绑定，无需再次输入 6 位访问码。');
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := (ExistingInstallation and (PageID = CodePage.ID)) or
+    ((not ExistingInstallation) and (PageID = UpdatePage.ID));
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if CurPageID = CodePage.ID then
+  if (not ExistingInstallation) and (CurPageID = CodePage.ID) then
   begin
     if (Length(CodePage.Values[0]) <> 0) and ((Length(CodePage.Values[0]) <> 6) or (CodePage.Values[0] < '000000') or (CodePage.Values[0] > '999999')) then
     begin
@@ -58,7 +68,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     Params := '-NoProfile -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{app}\install-service.ps1')) + ' -InstallPath ' + AddQuotes(ExpandConstant('{app}'));
-    if Length(CodePage.Values[0]) <> 0 then Params := Params + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
+    if (not ExistingInstallation) and (Length(CodePage.Values[0]) <> 0) then Params := Params + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
     if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
       MsgBox('客户端服务安装失败，错误代码: ' + IntToStr(ResultCode) + #13#10 + '详细日志：' + ExpandConstant('{commonappdata}\RentDeviceAgent\install-service.log'), mbError, MB_OK);
     if FileExists(ExpandConstant('{app}\RentDeviceAgent.exe')) then
@@ -89,4 +99,3 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Icons]
 Name: "{autodesktop}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
 Name: "{group}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"
-Name: "{commonstartup}\PC Rental 设备管理"; Filename: "{app}\RentDeviceAgent.exe"; WorkingDir: "{app}"

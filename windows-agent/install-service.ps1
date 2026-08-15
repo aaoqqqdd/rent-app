@@ -76,6 +76,9 @@ Invoke-Sc @('failureflag', $serviceName, '1')
 # restores it after a normal logout/login cycle without granting the renter admin rights.
 $runKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
 New-ItemProperty -Path $runKey -Name "PC Rental Device Agent UI" -Value "`"$exe`"" -PropertyType String -Force | Out-Null
+# Older installers also created a Startup-folder shortcut, which launched a duplicate UI.
+$legacyStartupShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonStartup)) "PC Rental 设备管理.lnk"
+Remove-Item $legacyStartupShortcut -Force -ErrorAction SilentlyContinue
 Start-Service $serviceName
 if ((Get-Service -Name $serviceName).Status -ne 'Running') { throw "服务已注册但未能进入 Running 状态" }
 Write-Host "Installed and started $serviceName"

@@ -6,8 +6,12 @@ public sealed class AgentLeaseOverlayForm : Form
     private readonly Label _lease = new() { AutoSize = true, ForeColor = Color.White, Font = new Font("Microsoft YaHei UI", 13, FontStyle.Bold) };
     private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "PC Rental 设备管理" };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15000 };
+    private readonly System.Windows.Forms.Timer _expiryTimer = new() { Interval = 3000 };
     private ToolStripMenuItem? _toggleOverlay;
     private Button? _bindButton;
+    private DateTime? _endDate;
+    private DateTime? _serverDate;
+    private bool _showRemaining;
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 
     public AgentLeaseOverlayForm()
@@ -56,7 +60,9 @@ public sealed class AgentLeaseOverlayForm : Form
         _tray.DoubleClick += (_, _) => { Show(); Activate(); };
         FormClosing += (_, e) => e.Cancel = IsBound();
         _timer.Tick += (_, _) => RefreshSnapshot();
+        _expiryTimer.Tick += (_, _) => { _showRemaining = !_showRemaining; ShowExpiry(); };
         _timer.Start();
+        _expiryTimer.Start();
         RefreshSnapshot();
     }
 
@@ -70,11 +76,12 @@ public sealed class AgentLeaseOverlayForm : Form
     {
         try
         {
-            if (!File.Exists(SnapshotPath)) { _lease.Text = "租期：等待设备连接"; _tray.Text = "PC Rental 设备管理 · 等待设备连接"; return; }
+            if (!File.Exists(SnapshotPath)) { _endDate = null; _lease.Text = "租期：等待设备连接"; _tray.Text = "PC Rental 设备管理 · 等待设备连接"; return; }
             var data = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(SnapshotPath));
             if (data is null) return;
             if (string.Equals(data.BindingStatus, "unbound", StringComparison.OrdinalIgnoreCase))
             {
+                _endDate = null;
                 _lease.Text = "设备未绑定";
                 _tray.Text = "PC Rental 设备管理 · 设备未绑定";
                 if (_bindButton is not null) _bindButton.Visible = true;
@@ -88,8 +95,9 @@ public sealed class AgentLeaseOverlayForm : Form
                 AgentSoftwareAgreementForm.ShowIfRequired(rentalKey, this);
                 return;
             }
-            _lease.Text = $"到期：{data.EndDate ?? "暂无租期"}";
-            _tray.Text = $"PC Rental 设备管理 · 到期：{data.EndDate ?? "暂无租期"}";
+            _endDate = DateTime.TryParse(data.EndDate, out var endDate) ? endDate.Date : null;
+            _serverDate = DateTimeOffset.TryParse(data.ServerTime, out var serverTime) ? serverTime.UtcDateTime.Date : null;
+            ShowExpiry();
         }
         catch { _lease.Text = "租期：暂时无法读取"; }
     }
@@ -101,11 +109,26 @@ public sealed class AgentLeaseOverlayForm : Form
         return File.Exists(statePath) && !File.Exists(unboundPath);
     }
 
-    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, string? RentalId, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus);
+    private void ShowExpiry()
+    {
+        if (_endDate is null)
+        {
+            _lease.Text = "到期：暂无租期";
+            _tray.Text = "PC Rental 设备管理 · 到期：暂无租期";
+            return;
+        }
+        var text = _showRemaining
+            ? (_endDate.Value < (_serverDate ?? DateTime.Now.Date) ? "租期已到期" : $"剩余：{(_endDate.Value - (_serverDate ?? DateTime.Now.Date)).Days} 天")
+            : $"到期：{_endDate:yyyy-MM-dd}";
+        _lease.Text = text;
+        _tray.Text = $"PC Rental 设备管理 · {text}";
+    }
+
+    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, string? RentalId, string? ServerTime, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus);
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _timer.Dispose(); _tray.Visible = false; _tray.Dispose(); }
+        if (disposing) { _timer.Dispose(); _expiryTimer.Dispose(); _tray.Visible = false; _tray.Dispose(); }
         base.Dispose(disposing);
     }
 }

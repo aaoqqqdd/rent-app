@@ -32,6 +32,7 @@ public sealed class AgentWorker : BackgroundService
     private string? _deviceId;
     private string? _registeredSerialNumber;
     private string? _detectedSerialNumber;
+    private string? _lastInspectionType;
 
     public AgentWorker(IHttpClientFactory httpClientFactory, IOptions<AgentOptions> options, ILogger<AgentWorker> logger)
     {
@@ -140,6 +141,8 @@ public sealed class AgentWorker : BackgroundService
     private async Task SendHeartbeatAsync(CancellationToken cancellationToken)
     {
         var client = AuthenticatedClient();
+        var inspectionType = _deviceMode == "return" ? "after_return" : (_beforeSnapshotSent ? "automated_health" : "before_rental");
+        var snapshot = BuildInspectionSnapshot();
         var payload = new
         {
             hostname = Environment.MachineName,
@@ -149,19 +152,46 @@ public sealed class AgentWorker : BackgroundService
             storageFreeBytes = GetStorageFreeBytes(),
             version = _options.Version,
             serialNumber = _detectedSerialNumber,
-            inspectionType = _deviceMode == "return" ? "after_return" : (_beforeSnapshotSent ? "automated_health" : "before_rental"),
-            snapshot = new { hostname = Environment.MachineName, osVersion = Environment.OSVersion.VersionString, cpu = ReadWmiValue("Win32_Processor", "Name"), memoryMb = ReadMemoryMb(), storageFreeBytes = GetStorageFreeBytes(), version = _options.Version }
+            inspectionType,
+            snapshot
         };
         using var response = await client.PostAsJsonAsync(Url("/api/device-agent/heartbeat"), payload, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); WriteAgentLog("网站已解绑本机，已立即切换为未绑定状态"); return; }
         response.EnsureSuccessStatusCode();
-        var heartbeatResult = await response.Content.ReadFromJsonAsync<HeartbeatResponse>(cancellationToken: cancellationToken);
+        var heartbeatResult = await response.Content.ReadFromJsonAsync<AgentState>(cancellationToken: cancellationToken);
         if (heartbeatResult?.Ok != true) throw new InvalidOperationException("网站未确认心跳");
         WriteAgentLog($"心跳成功：HTTP {(int)response.StatusCode}，设备 ID={_deviceId}");
-        var state = await response.Content.ReadFromJsonAsync<AgentState>(cancellationToken: cancellationToken);
-        if (!string.IsNullOrWhiteSpace(state?.DeviceMode)) _deviceMode = state.DeviceMode;
+        if (!string.IsNullOrWhiteSpace(heartbeatResult.DeviceMode)) _deviceMode = heartbeatResult.DeviceMode;
+        if (_lastInspectionType != inspectionType && inspectionType != "automated_health")
+        {
+            await SendInspectionAsync(inspectionType, snapshot, cancellationToken);
+            _lastInspectionType = inspectionType;
+        }
         _beforeSnapshotSent = true;
     }
+
+    private async Task SendInspectionAsync(string inspectionType, object snapshot, CancellationToken cancellationToken)
+    {
+        using var response = await AuthenticatedClient().PostAsJsonAsync(Url("/api/device-agent/inspection"), new { inspectionType, snapshot }, cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
+    private object BuildInspectionSnapshot() => new
+    {
+        hostname = Environment.MachineName,
+        osVersion = Environment.OSVersion.VersionString,
+        cpu = ReadWmiValue("Win32_Processor", "Name"),
+        memoryMb = ReadMemoryMb(),
+        storageFreeBytes = GetStorageFreeBytes(),
+        version = _options.Version,
+        screen = HasWmiDevice("SELECT Name FROM Win32_DesktopMonitor") ? "已识别" : "未识别",
+        keyboard = HasWmiDevice("SELECT Name FROM Win32_Keyboard") ? "已识别" : "未识别",
+        touchpad = HasWmiDevice("SELECT Name FROM Win32_PointingDevice WHERE Name LIKE '%Touchpad%'") ? "已识别" : "未识别",
+        body = "需人工目检",
+        camera = HasWmiDevice("SELECT Name FROM Win32_PnPEntity WHERE Name LIKE '%Camera%' OR Name LIKE '%Webcam%'") ? "已识别" : "未识别",
+        wifi = HasWmiDevice("SELECT Name FROM Win32_NetworkAdapter WHERE NetEnabled = TRUE AND (Name LIKE '%Wi-Fi%' OR Name LIKE '%Wireless%')") ? "已连接" : "未连接",
+        power = "通过（客户端正在运行）"
+    };
 
     private async Task ReadStateAsync(CancellationToken cancellationToken)
     {
@@ -172,13 +202,18 @@ public sealed class AgentWorker : BackgroundService
         if (state.TryGetProperty("rental", out var rental)) _rental = rental;
         if (state.TryGetProperty("serverTime", out var serverTime))
             _trustedServerTime = serverTime.ToString();
+        if (state.TryGetProperty("inspectionRequested", out var inspectionRequested) && inspectionRequested.ValueKind == JsonValueKind.True)
+        {
+            await SendInspectionAsync("automated_health", BuildInspectionSnapshot(), cancellationToken);
+            WriteAgentLog("收到网站验机请求，已上报最新自动巡检");
+        }
         _statusText = "已连接";
         var memory = ReadMemoryMb() / 1024d;
         var storage = GetStorageFreeBytes() / 1073741824d;
         var startDate = _rental?.TryGetProperty("start_date", out var start) == true ? start.ToString() : null;
         var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
         var rentalId = _rental?.TryGetProperty("id", out var id) == true ? id.ToString() : null;
-        var rentalStarted = _rental.HasValue && string.Equals(_rental.Value.GetProperty("status").ToString(), "active", StringComparison.OrdinalIgnoreCase) && DateTime.TryParse(startDate, out var rentalStart) && rentalStart.Date <= DateTime.Now.Date;
+        var rentalStarted = _rental.HasValue && string.Equals(_rental.Value.GetProperty("status").ToString(), "active", StringComparison.OrdinalIgnoreCase) && DateTime.TryParse(startDate, out var rentalStart) && rentalStart.Date <= RentalToday();
         WriteDashboardSnapshot(_statusText, startDate, endDate, rentalId, rentalStarted, memory, storage);
         SaveState();
         _logger.LogDebug("Current device state: {State}", state.ToString());
@@ -198,10 +233,16 @@ public sealed class AgentWorker : BackgroundService
     private void WriteDashboardSnapshot(string status, string? startDate, string? endDate, string? rentalId, bool protocolRequired, double? memoryGb, double? storageGb)
     {
         var dashboardPath = Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json");
-        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, Version = _options.Version, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
+        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ServerTime = _trustedServerTime, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, Version = _options.Version, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
     }
 
     private static double GetStorageGb() => new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;
+
+    private DateTime RentalToday()
+    {
+        return DateTimeOffset.TryParse(_trustedServerTime, out var serverTime) ? serverTime.UtcDateTime.Date : DateTime.Now.Date;
+    }
+
     private static long GetStorageFreeBytes()
     {
         try { return new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace; }
@@ -311,6 +352,16 @@ public sealed class AgentWorker : BackgroundService
         catch { return null; }
     }
 
+    private static bool HasWmiDevice(string query)
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(query);
+            return searcher.Get().Count > 0;
+        }
+        catch { return false; }
+    }
+
     private static long? ReadMemoryMb()
     {
         var value = ReadWmiValue("Win32_ComputerSystem", "TotalPhysicalMemory");
@@ -333,7 +384,6 @@ public sealed class AgentWorker : BackgroundService
     private string? _trustedServerTime;
     private sealed record State(string? Token, string? TrustedServerTime, string? RentalJson, string? DeviceId = null, string? RegisteredSerialNumber = null, string? DetectedSerialNumber = null);
     private sealed record RegisterResponse(bool Ok, string DeviceId, string SerialNumber, string Token);
-    private sealed record HeartbeatResponse(bool Ok);
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
     private sealed record GitHubRelease(string TagName, GitHubAsset[]? Assets);
     private sealed record GitHubAsset(string Name, string BrowserDownloadUrl);
