@@ -6,19 +6,17 @@ public sealed class AgentLeaseOverlayForm : Form
     private readonly Label _lease = new() { AutoSize = true, ForeColor = Color.White, Font = new Font("Microsoft YaHei UI", 13, FontStyle.Bold) };
     private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "PC Rental 设备管理" };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15000 };
-    private readonly System.Windows.Forms.Timer _expiryTimer = new() { Interval = 3000 };
     private ToolStripMenuItem? _toggleOverlay;
     private Button? _bindButton;
     private DateTime? _endDate;
     private DateTime? _serverDate;
-    private bool _showRemaining;
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 
     public AgentLeaseOverlayForm()
     {
         Text = "PC Rental 设备管理";
         Width = 330;
-        Height = 145;
+        Height = 165;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = false;
@@ -60,9 +58,7 @@ public sealed class AgentLeaseOverlayForm : Form
         _tray.DoubleClick += (_, _) => { Show(); Activate(); };
         FormClosing += (_, e) => e.Cancel = IsBound();
         _timer.Tick += (_, _) => RefreshSnapshot();
-        _expiryTimer.Tick += (_, _) => { _showRemaining = !_showRemaining; ShowExpiry(); };
         _timer.Start();
-        _expiryTimer.Start();
         RefreshSnapshot();
     }
 
@@ -92,7 +88,7 @@ public sealed class AgentLeaseOverlayForm : Form
             if (data.ProtocolRequired && !AgentSoftwareAgreementForm.IsAccepted(rentalKey))
             {
                 Hide();
-                AgentSoftwareAgreementForm.ShowIfRequired(rentalKey, this);
+                AgentSoftwareAgreementForm.ShowIfRequired(data.ApiBaseUrl, rentalKey, this);
                 return;
             }
             _endDate = DateTime.TryParse(data.EndDate, out var endDate) ? endDate.Date : null;
@@ -113,22 +109,20 @@ public sealed class AgentLeaseOverlayForm : Form
     {
         if (_endDate is null)
         {
-            _lease.Text = "到期：暂无租期";
+            _lease.Text = "剩余时间：暂无租期\r\n到期时间：暂无租期";
             _tray.Text = "PC Rental 设备管理 · 到期：暂无租期";
             return;
         }
-        var text = _showRemaining
-            ? (_endDate.Value < (_serverDate ?? DateTime.Now.Date) ? "租期已到期" : $"剩余：{(_endDate.Value - (_serverDate ?? DateTime.Now.Date)).Days} 天")
-            : $"到期：{_endDate:yyyy-MM-dd}";
-        _lease.Text = text;
-        _tray.Text = $"PC Rental 设备管理 · {text}";
+        var remaining = _endDate.Value < (_serverDate ?? DateTime.Now.Date) ? "已到期" : $"{(_endDate.Value - (_serverDate ?? DateTime.Now.Date)).Days} 天";
+        _lease.Text = $"剩余时间：{remaining}\r\n到期时间：{_endDate:yyyy-MM-dd}";
+        _tray.Text = $"PC Rental 设备管理 · 剩余 {remaining} · 到期 {_endDate:yyyy-MM-dd}";
     }
 
     private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, string? RentalId, string? ServerTime, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus);
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _timer.Dispose(); _expiryTimer.Dispose(); _tray.Visible = false; _tray.Dispose(); }
+        if (disposing) { _timer.Dispose(); _tray.Visible = false; _tray.Dispose(); }
         base.Dispose(disposing);
     }
 }
