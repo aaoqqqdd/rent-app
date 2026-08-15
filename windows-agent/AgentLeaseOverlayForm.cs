@@ -15,7 +15,7 @@ public sealed class AgentLeaseOverlayForm : Form
         Height = 145;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
-        TopMost = true;
+        TopMost = false;
         StartPosition = FormStartPosition.Manual;
         var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1280, 720);
         Location = new Point(area.Right - Width - 18, area.Bottom - Height - 18);
