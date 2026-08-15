@@ -3,6 +3,8 @@ name: Windows client release
 on:
   push:
     tags: ['v*']
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
@@ -36,7 +38,7 @@ jobs:
         run: iscc windows-agent/installer.iss
       - name: Upload release installer
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
         with:
           files: |
             windows-agent/output/RentDeviceAgent-Setup.exe
