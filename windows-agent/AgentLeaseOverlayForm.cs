@@ -6,6 +6,7 @@ public sealed class AgentLeaseOverlayForm : Form
     private readonly Label _lease = new() { AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI", 13, FontStyle.Bold) };
     private readonly NotifyIcon _tray = new() { Icon = SystemIcons.Application, Visible = true, Text = "Rent 设备管理" };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 5000 };
+    private ToolStripMenuItem? _toggleOverlay;
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 
     public AgentLeaseOverlayForm()
@@ -28,14 +29,21 @@ public sealed class AgentLeaseOverlayForm : Form
         open.Click += (_, _) => { using var form = new AgentDashboardForm(); form.ShowDialog(this); };
         Controls.AddRange([title, _lease, open]);
         _tray.ContextMenuStrip = new ContextMenuStrip();
-        _tray.ContextMenuStrip.Items.Add("打开租期窗口", null, (_, _) => { Show(); Activate(); });
+        _toggleOverlay = new ToolStripMenuItem("隐藏租期窗口");
+        _toggleOverlay.Click += (_, _) => ToggleOverlay();
+        _tray.ContextMenuStrip.Items.Add(_toggleOverlay);
         _tray.ContextMenuStrip.Items.Add("打开完整界面", null, (_, _) => open.PerformClick());
         _tray.DoubleClick += (_, _) => { Show(); Activate(); };
         FormClosing += (_, e) => e.Cancel = true;
         _timer.Tick += (_, _) => RefreshSnapshot();
         _timer.Start();
-        Shown += (_, _) => Hide();
         RefreshSnapshot();
+    }
+
+    private void ToggleOverlay()
+    {
+        if (Visible) Hide(); else { Show(); Activate(); }
+        if (_toggleOverlay is not null) _toggleOverlay.Text = Visible ? "隐藏租期窗口" : "显示租期窗口";
     }
 
     private void RefreshSnapshot()
