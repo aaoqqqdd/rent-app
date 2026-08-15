@@ -35,10 +35,10 @@ public sealed class AgentDashboardForm : Form
     private Control Header()
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2 };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
         var eyebrow = LabelFor("PC RENTAL / DEVICE AGENT", 9, FontStyle.Bold); eyebrow.ForeColor = Mint; eyebrow.Margin = new Padding(0, 0, 0, 3);
         var title = LabelFor("设备控制台", 25, FontStyle.Bold); title.Margin = new Padding(0); layout.Controls.Add(eyebrow, 0, 0); layout.Controls.Add(title, 0, 1);
-        var button = ActionButton("打开客户面板  [F1]", Blue); button.Anchor = AnchorStyles.Right | AnchorStyles.Bottom; button.Margin = new Padding(0, 0, 0, 8); button.Click += (_, _) => OpenCustomerPanel(); layout.Controls.Add(button, 1, 1); return layout;
+        var button = ActionButton("打开客户面板  [F1]", Blue); button.AutoSize = false; button.Dock = DockStyle.Fill; button.Margin = new Padding(12, 0, 0, 8); button.Click += (_, _) => OpenCustomerPanel(); layout.Controls.Add(button, 1, 1); return layout;
     }
 
     private Control Content()
@@ -52,7 +52,7 @@ public sealed class AgentDashboardForm : Form
     {
         var panel = new Panel { Dock = DockStyle.Fill, BackColor = Panel, Margin = new Padding(0, 0, 12, 12), Padding = new Padding(20) };
         var eyebrow = LabelFor(title.ToUpperInvariant(), 9, FontStyle.Bold); eyebrow.ForeColor = Muted; eyebrow.Dock = DockStyle.Top; eyebrow.Height = 22;
-        value.AutoSize = false; value.Dock = DockStyle.Top; value.Height = 48; value.ForeColor = Color.White; value.Padding = new Padding(0, 2, 0, 0);
+        value.AutoSize = false; value.Dock = DockStyle.Top; value.Height = 48; value.ForeColor = Color.White; value.Font = new Font("Microsoft YaHei UI", 12, FontStyle.Bold); value.AutoEllipsis = true; value.Padding = new Padding(0, 2, 0, 0);
         var note = LabelFor(hint, 9); note.AutoSize = false; note.Dock = DockStyle.Fill; note.ForeColor = Muted; note.Padding = new Padding(0, 5, 0, 0); panel.Controls.Add(note); panel.Controls.Add(value); panel.Controls.Add(eyebrow); return panel;
     }
 

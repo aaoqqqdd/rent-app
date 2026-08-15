@@ -265,6 +265,13 @@ public sealed class AgentWorker : BackgroundService
             await using var source = await client.GetStreamAsync(asset.BrowserDownloadUrl, cancellationToken);
             await using var target = File.Create(pending);
             await source.CopyToAsync(target, cancellationToken);
+            if (!File.Exists(pending) || new FileInfo(pending).Length < 100_000)
+                throw new InvalidOperationException("下载的更新文件无效或不完整");
+            await using (var header = File.OpenRead(pending))
+            {
+                if (header.ReadByte() != 'M' || header.ReadByte() != 'Z')
+                    throw new InvalidOperationException("下载内容不是 Windows EXE 文件");
+            }
             var script = Path.Combine(Path.GetTempPath(), "RentDeviceAgent-update.ps1");
             var processPath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "RentDeviceAgent.exe");
             var isService = Environment.GetCommandLineArgs().Any(arg => string.Equals(arg, "--service", StringComparison.OrdinalIgnoreCase));
@@ -275,7 +282,11 @@ public sealed class AgentWorker : BackgroundService
             _statusText = $"发现新版本 {version}，正在更新";
             Environment.Exit(0);
         }
-        catch (Exception ex) { _logger.LogDebug(ex, "Update check failed"); }
+        catch (Exception ex)
+        {
+            WriteAgentLog($"自动更新失败：{ex.GetType().Name}: {ex.Message}");
+            _logger.LogWarning(ex, "Update check failed");
+        }
     }
 
     private static bool IsNewerVersion(string candidate, string current)

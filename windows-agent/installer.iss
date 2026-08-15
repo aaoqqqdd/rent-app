@@ -68,6 +68,8 @@ begin
     if not ExistingInstall then Params := Params + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
     if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
       MsgBox('客户端服务安装失败，错误代码: ' + IntToStr(ResultCode) + #13#10 + '详细日志：' + ExpandConstant('{commonappdata}\RentDeviceAgent\install-service.log'), mbError, MB_OK);
+    if FileExists(ExpandConstant('{app}\RentDeviceAgent.exe')) then
+      Exec(ExpandConstant('{app}\RentDeviceAgent.exe'), '', '', SW_SHOWNORMAL, ewNoWait, ResultCode);
   end;
 end;
 
