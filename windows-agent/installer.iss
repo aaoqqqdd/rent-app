@@ -31,12 +31,14 @@ procedure InitializeWizard;
 begin
   CodePage := CreateInputQueryPage(wpSelectDir, '设备绑定', '输入管理员生成的 6 位访问码', '请从网站设备详情页复制 6 位访问码。安装程序会自动绑定本机设备并注册 Windows Service。');
   CodePage.Add('6 位访问码:', False);
+  if FileExists(ExpandConstant('{commonappdata}\RentDeviceAgent\state.json')) then
+    CodePage.Visible := False;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if CurPageID = CodePage.ID then
+  if (CurPageID = CodePage.ID) and CodePage.Visible then
   begin
     if (Length(CodePage.Values[0]) <> 6) or (CodePage.Values[0] < '000000') or (CodePage.Values[0] > '999999') then
     begin
@@ -51,7 +53,8 @@ var ResultCode: Integer; Params: String;
 begin
   if CurStep = ssPostInstall then
   begin
-    Params := '-NoProfile -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{app}\install-service.ps1')) + ' -InstallPath ' + AddQuotes(ExpandConstant('{app}')) + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
+    Params := '-NoProfile -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{app}\install-service.ps1')) + ' -InstallPath ' + AddQuotes(ExpandConstant('{app}'));
+    if CodePage.Visible then Params := Params + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
     if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
       MsgBox('客户端服务安装失败，请确认使用管理员权限后重试。错误代码: ' + IntToStr(ResultCode), mbError, MB_OK);
   end;
