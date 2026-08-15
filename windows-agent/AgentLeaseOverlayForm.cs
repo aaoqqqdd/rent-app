@@ -78,8 +78,8 @@ public sealed class AgentLeaseOverlayForm : Form
 
     private void ShowMainPanel()
     {
-        Hide();
         using var form = new AgentDashboardForm();
+        form.FormClosed += (_, _) => MessageBox.Show("主面板已关闭。您可以从任务栏托盘图标重新打开主面板。", "PC Rental 设备管理", MessageBoxButtons.OK, MessageBoxIcon.Information);
         form.ShowDialog(this);
     }
 
