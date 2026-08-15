@@ -165,11 +165,15 @@ public sealed class AgentWorker : BackgroundService
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Administrator", "admin" };
         try
         {
-            using var searcher = new ManagementObjectSearcher("SELECT PartComponent FROM Win32_GroupUser WHERE GroupComponent LIKE '%Administrators%'");
-            foreach (ManagementObject item in searcher.Get())
+            using var groupSearcher = new ManagementObjectSearcher("SELECT __PATH FROM Win32_Group WHERE SID = 'S-1-5-32-544'");
+            var group = groupSearcher.Get().Cast<ManagementObject>().FirstOrDefault();
+            var groupPath = group?["__PATH"]?.ToString();
+            if (string.IsNullOrWhiteSpace(groupPath)) return names;
+            using var memberSearcher = new ManagementObjectSearcher($"ASSOCIATORS OF {{{groupPath}}} WHERE AssocClass=Win32_GroupUser Role=GroupComponent");
+            foreach (ManagementObject item in memberSearcher.Get())
             {
-                var match = System.Text.RegularExpressions.Regex.Match(item["PartComponent"]?.ToString() ?? "", "Name=\\\"([^\\\"]+)\\\"");
-                if (match.Success) names.Add(match.Groups[1].Value);
+                var accountName = item["Name"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(accountName)) names.Add(accountName);
             }
         }
         catch { }
