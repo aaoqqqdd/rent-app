@@ -30,8 +30,8 @@ var
 
 procedure InitializeWizard;
 begin
-  CodePage := CreateInputQueryPage(wpSelectDir, '设备绑定', '输入管理员生成的 6 位访问码', '请从网站设备详情页复制 6 位访问码。安装程序会自动绑定本机设备并注册 Windows Service。');
-  CodePage.Add('6 位访问码:', False);
+  CodePage := CreateInputQueryPage(wpSelectDir, '设备绑定', '设备绑定方式', '客户端会先读取 BIOS 序列号自动绑定；如果网站没有相同序列号，请填写管理员生成的 6 位访问码。');
+  CodePage.Add('6 位访问码（自动绑定时可留空）:', False);
   ExistingInstall := FileExists(ExpandConstant('{commonappdata}\RentDeviceAgent\state.json'));
 end;
 
@@ -45,9 +45,9 @@ begin
   Result := True;
   if (CurPageID = CodePage.ID) and not ExistingInstall then
   begin
-    if (Length(CodePage.Values[0]) <> 6) or (CodePage.Values[0] < '000000') or (CodePage.Values[0] > '999999') then
+    if (Length(CodePage.Values[0]) <> 0) and ((Length(CodePage.Values[0]) <> 6) or (CodePage.Values[0] < '000000') or (CodePage.Values[0] > '999999')) then
     begin
-      MsgBox('请输入恰好 6 位数字访问码。', mbError, MB_OK);
+      MsgBox('访问码必须为空，或填写恰好 6 位数字。', mbError, MB_OK);
       Result := False;
     end;
   end;
@@ -61,7 +61,7 @@ begin
     Params := '-NoProfile -ExecutionPolicy Bypass -File ' + AddQuotes(ExpandConstant('{app}\install-service.ps1')) + ' -InstallPath ' + AddQuotes(ExpandConstant('{app}'));
     if not ExistingInstall then Params := Params + ' -SetupCode ' + AddQuotes(CodePage.Values[0]);
     if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
-      MsgBox('客户端服务安装失败，请确认使用管理员权限后重试。错误代码: ' + IntToStr(ResultCode), mbError, MB_OK);
+      MsgBox('客户端服务安装失败，错误代码: ' + IntToStr(ResultCode) + #13#10 + '详细日志：' + ExpandConstant('{commonappdata}\RentDeviceAgent\install-service.log'), mbError, MB_OK);
   end;
 end;
 

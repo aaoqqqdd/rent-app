@@ -69,13 +69,7 @@ public sealed class AgentWorker : BackgroundService
     {
         if (string.IsNullOrWhiteSpace(_options.ApiBaseUrl))
             throw new InvalidOperationException("ApiBaseUrl is required");
-        if (string.IsNullOrWhiteSpace(_options.SetupCode) && Environment.UserInteractive)
-        {
-            Console.Write("请输入 6 位设备注册码：");
-            _options.SetupCode = (Console.ReadLine() ?? "").Trim();
-        }
-        if (!System.Text.RegularExpressions.Regex.IsMatch(_options.SetupCode, "^\\d{6}$"))
-            throw new InvalidOperationException("请输入 6 位数字注册码");
+        _options.SerialNumber = ReadDeviceSerialNumber();
 
         var client = _httpClientFactory.CreateClient("rent");
         using var request = new HttpRequestMessage(HttpMethod.Post, Url("/api/device-agent/register"));
@@ -90,6 +84,21 @@ public sealed class AgentWorker : BackgroundService
         _options.SerialNumber = result.SerialNumber;
         _options.SetupCode = "";
         _logger.LogInformation("Device registered as {DeviceId}", result.DeviceId);
+    }
+
+    private string ReadDeviceSerialNumber()
+    {
+        foreach (var query in new[] { "SELECT SerialNumber FROM Win32_BIOS", "SELECT SerialNumber FROM Win32_BaseBoard" })
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(query);
+                var value = searcher.Get().Cast<ManagementObject>().Select(item => item["SerialNumber"]?.ToString()?.Trim()).FirstOrDefault(item => !string.IsNullOrWhiteSpace(item) && !item.Equals("To be filled by O.E.M.", StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrWhiteSpace(value)) return value;
+            }
+            catch { }
+        }
+        return _options.SerialNumber;
     }
 
     private async Task SendHeartbeatAsync(CancellationToken cancellationToken)
@@ -194,23 +203,47 @@ public sealed class AgentWorker : BackgroundService
     {
         if ((DateTime.UtcNow - _lastUpdateCheck).TotalHours < Math.Max(1, _options.UpdateCheckIntervalHours)) return;
         _lastUpdateCheck = DateTime.UtcNow;
-        if (string.IsNullOrWhiteSpace(_options.UpdateManifestUrl)) return;
         try
         {
             var client = _httpClientFactory.CreateClient("rent");
-            var update = await client.GetFromJsonAsync<UpdateInfo>(_options.UpdateManifestUrl, cancellationToken);
-            if (update is null || string.IsNullOrWhiteSpace(update.Version) || string.IsNullOrWhiteSpace(update.DownloadUrl) || update.Version == _options.Version) return;
-            var pending = Path.Combine(AppContext.BaseDirectory, "RentDeviceAgent.new.exe");
-            await using var source = await client.GetStreamAsync(update.DownloadUrl, cancellationToken);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("RentDeviceAgent/1.0");
+            var release = await client.GetFromJsonAsync<GitHubRelease>($"https://api.github.com/repos/{_options.GitHubRepository}/releases/latest", cancellationToken);
+            if (release is null || string.IsNullOrWhiteSpace(release.TagName)) return;
+            var version = release.TagName.TrimStart('v', 'V');
+            if (!IsNewerVersion(version, _options.Version)) return;
+            var asset = release.Assets?.FirstOrDefault(item => string.Equals(item.Name, _options.GitHubReleaseAsset, StringComparison.OrdinalIgnoreCase))
+                ?? release.Assets?.FirstOrDefault(item => item.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+            if (asset is null || string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl)) return;
+            var updateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "Updates");
+            Directory.CreateDirectory(updateDirectory);
+            var pending = Path.Combine(updateDirectory, "RentDeviceAgent.new.exe");
+            await using var source = await client.GetStreamAsync(asset.BrowserDownloadUrl, cancellationToken);
             await using var target = File.Create(pending);
             await source.CopyToAsync(target, cancellationToken);
             var script = Path.Combine(Path.GetTempPath(), "RentDeviceAgent-update.ps1");
-            await File.WriteAllTextAsync(script, $"Start-Sleep -Seconds 3; Move-Item -Force '{pending}' '{Environment.ProcessPath}'; Start-Process '{Environment.ProcessPath}'", cancellationToken);
-            Process.Start(new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\"") { CreateNoWindow = true, UseShellExecute = false });
-            _statusText = $"发现新版本 {update.Version}，正在更新";
+            var processPath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "RentDeviceAgent.exe");
+            var isService = Environment.GetCommandLineArgs().Any(arg => string.Equals(arg, "--service", StringComparison.OrdinalIgnoreCase));
+            var updater = $"param([string]$Pending,[string]$Target,[switch]$Service)\n$ErrorActionPreference = 'Stop'\nStart-Sleep -Seconds 4\nif ($Service) {{ & \"$env:SystemRoot\\System32\\sc.exe\" stop RentDeviceAgent | Out-Null; Start-Sleep -Seconds 3 }}\nfor ($i = 0; $i -lt 12; $i++) {{ try {{ Move-Item -Force -LiteralPath $Pending -Destination $Target; break }} catch {{ if ($i -eq 11) {{ throw }}; Start-Sleep -Seconds 2 }} }}\nif ($Service) {{ & \"$env:SystemRoot\\System32\\sc.exe\" start RentDeviceAgent | Out-Null }} else {{ Start-Process -FilePath $Target }}\n";
+            await File.WriteAllTextAsync(script, updater, cancellationToken);
+            var args = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Pending \"{pending}\" -Target \"{processPath}\"" + (isService ? " -Service" : "");
+            Process.Start(new ProcessStartInfo("powershell.exe", args) { CreateNoWindow = true, UseShellExecute = false });
+            _statusText = $"发现新版本 {version}，正在更新";
             Environment.Exit(0);
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Update check failed"); }
+    }
+
+    private static bool IsNewerVersion(string candidate, string current)
+    {
+        var candidateParts = candidate.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        var currentParts = current.TrimStart('v', 'V').Split('.', StringSplitOptions.RemoveEmptyEntries);
+        for (var index = 0; index < Math.Max(candidateParts.Length, currentParts.Length); index++)
+        {
+            _ = int.TryParse(index < candidateParts.Length ? candidateParts[index] : "0", out var next);
+            _ = int.TryParse(index < currentParts.Length ? currentParts[index] : "0", out var now);
+            if (next != now) return next > now;
+        }
+        return false;
     }
 
     private HttpClient AuthenticatedClient()
@@ -264,7 +297,8 @@ public sealed class AgentWorker : BackgroundService
     private sealed record State(string? Token, string? TrustedServerTime, string? RentalJson);
     private sealed record RegisterResponse(bool Ok, string DeviceId, string SerialNumber, string Token);
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
-    private sealed record UpdateInfo(string Version, string DownloadUrl);
+    private sealed record GitHubRelease(string TagName, GitHubAsset[]? Assets);
+    private sealed record GitHubAsset(string Name, string BrowserDownloadUrl);
 
     [DllImport("user32.dll")]
     private static extern bool LockWorkStation();
