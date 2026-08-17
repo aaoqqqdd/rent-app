@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Security.Cryptography;
 using System.Net;
 using System.Diagnostics;
+using System.Globalization;
 using Microsoft.Extensions.Options;
 
 public sealed class AgentWorker : BackgroundService
@@ -199,7 +200,7 @@ public sealed class AgentWorker : BackgroundService
             try
             {
                 if (command.DeviceId != _deviceId) throw new InvalidOperationException("命令不属于当前设备");
-                if (!DateTimeOffset.TryParse(command.ExpiresAt, out var expiresAt) || expiresAt <= DateTimeOffset.UtcNow) { resultCode = "EXPIRED"; message = "命令已过期"; }
+                if (!DateTimeOffset.TryParse(command.ExpiresAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var expiresAt) || expiresAt <= DateTimeOffset.UtcNow) { resultCode = "EXPIRED"; message = "命令已过期"; }
                 else if (!Enum.TryParse<AgentCommandType>(command.CommandType, true, out var type)) { resultCode = "UNSUPPORTED"; message = "不支持的命令类型"; }
                 else
                 {
