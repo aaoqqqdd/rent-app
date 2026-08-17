@@ -27,6 +27,7 @@ public sealed class AgentWorker : BackgroundService
     private string _statusText = "正在连接";
     private JsonElement? _rental;
     private DateTime _lastUpdateCheck = DateTime.MinValue;
+    private bool _forceUpdateCheck;
     private string? _latestVersion;
     private string? _updateDownloadUrl;
     private int _consecutiveFailures;
@@ -90,6 +91,7 @@ public sealed class AgentWorker : BackgroundService
             if (File.Exists(_refreshRequestPath))
             {
                 File.Delete(_refreshRequestPath);
+                _forceUpdateCheck = true;
                 return;
             }
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
@@ -412,7 +414,9 @@ foreach ($app in $apps) {
 
     private async Task CheckForUpdateAsync(CancellationToken cancellationToken)
     {
-        if ((DateTime.UtcNow - _lastUpdateCheck).TotalHours < Math.Max(1, _options.UpdateCheckIntervalHours)) return;
+        var forced = _forceUpdateCheck;
+        _forceUpdateCheck = false;
+        if (!forced && (DateTime.UtcNow - _lastUpdateCheck).TotalHours < Math.Max(1, _options.UpdateCheckIntervalHours)) return;
         _lastUpdateCheck = DateTime.UtcNow;
         try
         {
@@ -430,6 +434,7 @@ foreach ($app in $apps) {
             _latestVersion = version;
             _updateDownloadUrl = $"https://github.com/{_options.GitHubRepository}/releases/tag/v{version}";
             WriteDashboardSnapshotFromCurrentState();
+            if (!forced) return;
             var updateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "Updates");
             Directory.CreateDirectory(updateDirectory);
             var pending = Path.Combine(updateDirectory, "RentDeviceAgent.new.exe");

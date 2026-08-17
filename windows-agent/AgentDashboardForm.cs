@@ -13,6 +13,7 @@ public sealed class AgentDashboardForm : Form
     private readonly Label _deviceId = ValueLabel("未绑定");
     private readonly Label _rental = ValueLabel("—");
     private readonly Label _version = ValueLabel("—");
+    private readonly LinkLabel _updateLink = new() { Text = "", AutoSize = true, LinkColor = Color.FromArgb(113, 224, 181), ActiveLinkColor = Color.White, VisitedLinkColor = Color.FromArgb(113, 224, 181), Cursor = Cursors.Hand };
     private readonly Label _sync = ValueLabel("—");
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 2000 };
     private readonly NotifyIcon _notify = new() { Icon = SystemIcons.Application, Visible = false, Text = "PC Rental 设备管理" };
@@ -61,11 +62,14 @@ public sealed class AgentDashboardForm : Form
     private Control Footer()
     {
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Padding = new Padding(0, 4, 0, 0) };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 22));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.ColumnCount = 3;
         _version.AutoSize = false; _version.Dock = DockStyle.Fill; _version.ForeColor = Muted; _version.Font = new Font("Microsoft YaHei UI", 9); layout.Controls.Add(_version, 0, 0);
-        var refresh = ActionButton("同步一次  [F5]", Color.FromArgb(35, 58, 78)); refresh.AutoSize = false; refresh.Dock = DockStyle.Fill; refresh.Margin = new Padding(8, 0, 0, 0); refresh.Click += (_, _) => RequestRefresh(); layout.Controls.Add(refresh, 1, 0); return layout;
+        _updateLink.Anchor = AnchorStyles.Left; _updateLink.Visible = false; _updateLink.LinkClicked += (_, _) => OpenLatestVersion(); layout.Controls.Add(_updateLink, 1, 0);
+        var refresh = ActionButton("同步一次  [F5]", Color.FromArgb(35, 58, 78)); refresh.AutoSize = false; refresh.Dock = DockStyle.Fill; refresh.Margin = new Padding(8, 0, 0, 0); refresh.Click += (_, _) => RequestRefresh(); layout.Controls.Add(refresh, 2, 0); return layout;
     }
 
     private void RequestRefresh()
@@ -107,6 +111,9 @@ public sealed class AgentDashboardForm : Form
             _rental.Text = data.EndDate is null ? "暂无租期" : $"开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate}";
             _version.Text = $"版本 {data.Version}  ·  最后同步 {data.UpdatedAt:yyyy-MM-dd HH:mm:ss}";
             _sync.Text = _version.Text;
+            _updateLink.Visible = !string.IsNullOrWhiteSpace(data.LatestVersion) && !string.IsNullOrWhiteSpace(data.UpdateDownloadUrl);
+            _updateLink.Text = _updateLink.Visible ? $"下载最新版 {data.LatestVersion}" : "";
+            _updateLink.Tag = data.UpdateDownloadUrl;
             if (!string.IsNullOrWhiteSpace(data.ApiBaseUrl)) _customerPanelUrl = $"{data.ApiBaseUrl.TrimEnd('/')}/login";
             if (!_expiryNotified && DateTime.TryParse(data.EndDate, out var endDate) && (endDate.Date - DateTime.Now.Date).TotalDays <= 3 && endDate.Date >= DateTime.Now.Date) { _notify.ShowBalloonTip(8000, "租期即将到期", $"设备租期将在 {endDate:yyyy-MM-dd} 到期。", ToolTipIcon.Warning); _expiryNotified = true; }
         }
@@ -124,9 +131,15 @@ public sealed class AgentDashboardForm : Form
         try { Process.Start(new ProcessStartInfo(_customerPanelUrl) { UseShellExecute = true }); }
         catch (Exception ex) { MessageBox.Show($"无法打开客户面板：{ex.Message}", "PC Rental", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     }
+    private void OpenLatestVersion()
+    {
+        if (_updateLink.Tag is not string url || string.IsNullOrWhiteSpace(url)) return;
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { MessageBox.Show($"无法打开下载页面：{ex.Message}", "PC Rental", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
     protected override void Dispose(bool disposing) { if (disposing) { _timer.Dispose(); _notify.Visible = false; _notify.Dispose(); } base.Dispose(disposing); }
     private static Label LabelFor(string text, float size = 15, FontStyle style = FontStyle.Regular) => new() { Text = text, AutoSize = true, Font = new Font("Microsoft YaHei UI", size, style), ForeColor = Color.White };
     private static Label ValueLabel(string text) => LabelFor(text, 14, FontStyle.Bold);
     private static Button ActionButton(string text, Color background) => new() { Text = text, AutoSize = true, Height = 34, FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 }, BackColor = background, ForeColor = Color.White, Padding = new Padding(14, 0, 14, 0), Cursor = Cursors.Hand };
-    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? DeviceId = null, string? RegisteredSerialNumber = null, string? DetectedSerialNumber = null);
+    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? DeviceId = null, string? RegisteredSerialNumber = null, string? DetectedSerialNumber = null, string? LatestVersion = null, string? UpdateDownloadUrl = null);
 }
