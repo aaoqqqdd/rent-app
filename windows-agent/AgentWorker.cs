@@ -33,6 +33,8 @@ public sealed class AgentWorker : BackgroundService
     private string? _registeredSerialNumber;
     private string? _detectedSerialNumber;
     private string? _lastInspectionType;
+    private string? _messageTitle;
+    private string? _messageBody;
 
     public AgentWorker(IHttpClientFactory httpClientFactory, IOptions<AgentOptions> options, ILogger<AgentWorker> logger)
     {
@@ -57,6 +59,7 @@ public sealed class AgentWorker : BackgroundService
                 {
                     await SendHeartbeatAsync(stoppingToken);
                     await ReadStateAsync(stoppingToken);
+                    await ProcessCommandsAsync(stoppingToken);
                     await CheckForUpdateAsync(stoppingToken);
                 }
                 _consecutiveFailures = 0;
@@ -176,6 +179,68 @@ public sealed class AgentWorker : BackgroundService
         response.EnsureSuccessStatusCode();
     }
 
+    private async Task ProcessCommandsAsync(CancellationToken cancellationToken)
+    {
+        using var response = await AuthenticatedClient().GetAsync(Url("/api/device-agent/commands"), cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var envelope = await response.Content.ReadFromJsonAsync<CommandEnvelope>(cancellationToken: cancellationToken);
+        foreach (var command in envelope?.Commands ?? Array.Empty<DeviceCommand>())
+        {
+            var success = false;
+            var resultCode = "FAILED";
+            var message = "命令执行失败";
+            try
+            {
+                if (command.DeviceId != _deviceId) throw new InvalidOperationException("命令不属于当前设备");
+                if (!DateTimeOffset.TryParse(command.ExpiresAt, out var expiresAt) || expiresAt <= DateTimeOffset.UtcNow) { resultCode = "EXPIRED"; message = "命令已过期"; }
+                else if (!Enum.TryParse<AgentCommandType>(command.CommandType, true, out var type)) { resultCode = "UNSUPPORTED"; message = "不支持的命令类型"; }
+                else
+                {
+                    var commandPayload = JsonSerializer.Deserialize<JsonElement>(command.Payload ?? "{}" );
+                    switch (type)
+                    {
+                        case AgentCommandType.SYNC:
+                            await WriteRefreshRequestAsync(); resultCode = "SYNC_REQUESTED"; message = "已请求立即同步"; success = true; break;
+                        case AgentCommandType.REFRESH_DEVICE_INFO:
+                            await SendInspectionAsync("automated_health", BuildInspectionSnapshot(), cancellationToken); resultCode = "REFRESHED"; message = "设备信息已刷新"; success = true; break;
+                        case AgentCommandType.CHECK_UPDATE:
+                            _lastUpdateCheck = DateTime.MinValue; resultCode = "UPDATE_CHECK_REQUESTED"; message = "已请求检查更新"; success = true; break;
+                        case AgentCommandType.PAUSE_RENTAL:
+                            _deviceMode = "maintenance"; WriteDashboardSnapshotFromCurrentState(); resultCode = "PAUSED"; message = "设备已进入维护状态"; success = true; break;
+                        case AgentCommandType.RESUME_RENTAL:
+                            _deviceMode = "normal"; WriteDashboardSnapshotFromCurrentState(); resultCode = "RESUMED"; message = "设备已恢复正常状态"; success = true; break;
+                        case AgentCommandType.SHOW_MESSAGE:
+                            var title = commandPayload.TryGetProperty("title", out var titleValue) ? titleValue.ToString() : "租赁通知";
+                            var body = commandPayload.TryGetProperty("message", out var bodyValue) ? bodyValue.ToString() : "您收到一条租赁通知。";
+                            _messageTitle = title[..Math.Min(title.Length, 120)]; _messageBody = body[..Math.Min(body.Length, 500)]; WriteDashboardSnapshotFromCurrentState(); WriteAgentLog($"收到通知：{title} - {body}".Replace("\r", " ").Replace("\n", " ")); resultCode = "MESSAGE_RECEIVED"; message = "通知已显示"; success = true; break;
+                    }
+                }
+            }
+            catch (Exception ex) { message = ex.Message; WriteAgentLog($"命令 {command.Id} 执行失败：{ex.Message}"); }
+            await ReportCommandResultAsync(command.Id, success, resultCode, message, cancellationToken);
+        }
+    }
+
+    private async Task WriteRefreshRequestAsync()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_refreshRequestPath)!);
+        await File.WriteAllTextAsync(_refreshRequestPath, DateTime.UtcNow.ToString("O"));
+    }
+
+    private async Task ReportCommandResultAsync(string commandId, bool success, string resultCode, string message, CancellationToken cancellationToken)
+    {
+        await AuthenticatedClient().PostAsJsonAsync(Url("/api/device-agent/command-results"), new { commandId, success, resultCode, message, executedAt = DateTime.UtcNow.ToString("O") }, cancellationToken);
+        WriteAgentLog($"命令 {commandId}：{resultCode} - {message}");
+    }
+
+    private void WriteDashboardSnapshotFromCurrentState()
+    {
+        var startDate = _rental?.TryGetProperty("start_date", out var start) == true ? start.ToString() : null;
+        var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
+        var rentalId = _rental?.TryGetProperty("id", out var id) == true ? id.ToString() : null;
+        WriteDashboardSnapshot(_statusText, startDate, endDate, rentalId, false, null, null);
+    }
+
     private object BuildInspectionSnapshot()
     {
         var battery = ReadBatteryInfo();
@@ -240,7 +305,7 @@ public sealed class AgentWorker : BackgroundService
     private void WriteDashboardSnapshot(string status, string? startDate, string? endDate, string? rentalId, bool protocolRequired, double? memoryGb, double? storageGb)
     {
         var dashboardPath = Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json");
-        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ServerTime = _trustedServerTime, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, Version = _options.Version, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
+        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ServerTime = _trustedServerTime, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, MessageTitle = _messageTitle, MessageBody = _messageBody, Version = _options.Version, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
     }
 
     private static double GetStorageGb() => new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;
@@ -407,7 +472,18 @@ public sealed class AgentWorker : BackgroundService
         {
             var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent");
             Directory.CreateDirectory(directory);
-            File.AppendAllText(Path.Combine(directory, "agent.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+            var path = Path.Combine(directory, "agent.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 10 * 1024 * 1024)
+            {
+                for (var index = 9; index >= 1; index--)
+                {
+                    var source = index == 1 ? path : $"{path}.{index - 1}";
+                    var target = $"{path}.{index}";
+                    if (File.Exists(source)) File.Copy(source, target, true);
+                }
+                File.WriteAllText(path, string.Empty);
+            }
+            File.AppendAllText(path, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
         }
         catch { }
     }
@@ -417,6 +493,9 @@ public sealed class AgentWorker : BackgroundService
     private sealed record BatteryInfo(int? Cycles, string? Health);
     private sealed record RegisterResponse(bool Ok, string DeviceId, string SerialNumber, string Token);
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
+    private sealed record CommandEnvelope(bool Ok, DeviceCommand[] Commands);
+    private sealed record DeviceCommand(string Id, string DeviceId, string CommandType, string Payload, string Status, string CreatedAt, string ExpiresAt);
+    private enum AgentCommandType { SYNC, SHOW_MESSAGE, PAUSE_RENTAL, RESUME_RENTAL, REFRESH_DEVICE_INFO, CHECK_UPDATE }
     private sealed record GitHubRelease(string TagName, GitHubAsset[]? Assets);
     private sealed record GitHubAsset(string Name, string BrowserDownloadUrl);
 
