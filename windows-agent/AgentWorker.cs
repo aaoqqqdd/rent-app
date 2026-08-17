@@ -242,8 +242,10 @@ public sealed class AgentWorker : BackgroundService
         var username = SafeWindowsUsername(payload.TryGetProperty("username", out var name) ? name.ToString() : "");
         var password = payload.TryGetProperty("password", out var pass) ? pass.ToString() : "";
         if (string.IsNullOrWhiteSpace(username) || username.Equals("Admin", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(password)) throw new InvalidOperationException("租户账户资料无效");
-        if (!create) await RunNetAsync("user", username, "/delete");
-        await RunNetAsync("user", username, password, "/add", "/y");
+        if (create || !await UserExistsAsync(username))
+            await RunNetAsync("user", username, password, "/add", "/y");
+        else
+            await RunNetAsync("user", username, password);
         // Explicitly remove elevated membership even when Windows reused an existing
         // local account or an old provisioning attempt added it to Administrators.
         await RunNetBestEffortAsync("localgroup", "Administrators", username, "/delete");
@@ -276,6 +278,16 @@ public sealed class AgentWorker : BackgroundService
     private static async Task RunNetBestEffortAsync(params string[] args)
     {
         try { await RunNetAsync(args); } catch { }
+    }
+
+    private static async Task<bool> UserExistsAsync(string username)
+    {
+        try
+        {
+            await RunNetAsync("user", username);
+            return true;
+        }
+        catch { return false; }
     }
 
     private static async Task InstallRentalShortcutsAsync(string username)
