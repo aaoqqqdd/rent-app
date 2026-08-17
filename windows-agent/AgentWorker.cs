@@ -75,7 +75,10 @@ public sealed class AgentWorker : BackgroundService
             }
 
             // Keep the website roster responsive while still avoiding a tight loop.
-            var baseSeconds = Math.Clamp(_options.HeartbeatIntervalSeconds, 10, 3600);
+            // Remote commands should be picked up promptly after an admin
+            // submits them, even when the normal heartbeat is configured
+            // longer for production traffic.
+            var baseSeconds = Math.Clamp(_options.HeartbeatIntervalSeconds, 5, 10);
             var seconds = _consecutiveFailures == 0
                 ? baseSeconds
                 : Math.Min(300, Math.Max(5, 5 * (1 << Math.Min(_consecutiveFailures - 1, 5))));
