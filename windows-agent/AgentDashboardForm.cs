@@ -110,7 +110,7 @@ public sealed class AgentDashboardForm : Form
             if (greeting is not null) greeting.Text = string.IsNullOrWhiteSpace(data.CustomerName) ? "你好" : $"你好，{data.CustomerName}";
             _status.ForeColor = data.Status?.Contains("失败", StringComparison.OrdinalIgnoreCase) == true || data.Status?.Contains("无法", StringComparison.OrdinalIgnoreCase) == true ? Color.FromArgb(248, 113, 113) : Mint;
             _deviceId.Text = string.IsNullOrWhiteSpace(data.DeviceId) ? "未绑定" : "已绑定";
-            _rental.Text = data.EndDate is null ? "暂无租期" : $"开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate}";
+            _rental.Text = string.Equals(data.RentalStatus, "active", StringComparison.OrdinalIgnoreCase) ? $"{RentalStatusLabel(data.RentalStatus)}\r\n开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate ?? "—"}" : RentalStatusLabel(data.RentalStatus);
             _version.Text = $"版本 {data.Version}  ·  最后同步 {data.UpdatedAt:yyyy-MM-dd HH:mm:ss}";
             _sync.Text = _version.Text;
             _updateLink.Visible = !string.IsNullOrWhiteSpace(data.LatestVersion) && !string.IsNullOrWhiteSpace(data.UpdateDownloadUrl);
@@ -143,5 +143,6 @@ public sealed class AgentDashboardForm : Form
     private static Label LabelFor(string text, float size = 15, FontStyle style = FontStyle.Regular) => new() { Text = text, AutoSize = true, Font = new Font("Microsoft YaHei UI", size, style), ForeColor = Color.White };
     private static Label ValueLabel(string text) => LabelFor(text, 14, FontStyle.Bold);
     private static Button ActionButton(string text, Color background) => new() { Text = text, AutoSize = true, Height = 34, FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 }, BackColor = background, ForeColor = Color.White, Padding = new Padding(14, 0, 14, 0), Cursor = Cursors.Hand };
-    private sealed record Snapshot(string Status, string DeviceMode, string? CustomerName, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? DeviceId = null, string? RegisteredSerialNumber = null, string? DetectedSerialNumber = null, string? LatestVersion = null, string? UpdateDownloadUrl = null);
+    private static string RentalStatusLabel(string? status) => status?.ToLowerInvariant() switch { "pending" or "pending_payment" or "pending_approval" => "PENDING: 待处理", "awaiting_signature" => "AWAITING_SIGNATURE: 待签合同", "paid" or "approved" => "CONFIRMED: 租赁已确认，等待开始", "pending_pickup" => "READY_FOR_PICKUP: 待取货", "active" => "ACTIVE: 租赁中", "extended" => "EXTENDED: 已延期 / 租赁中", "overdue" => "OVERDUE: 已逾期", "suspended" => "SUSPENDED: 已暂停", "pending_return" => "RETURN_PENDING: 待归还", "returned" => "RETURNED: 已归还", "completed" => "COMPLETED: 已完成", "cancelled" => "CANCELLED: 已取消", _ => "暂无租赁状态" };
+    private sealed record Snapshot(string Status, string DeviceMode, string? CustomerName, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? RentalStatus = null, string? DeviceId = null, string? RegisteredSerialNumber = null, string? DetectedSerialNumber = null, string? LatestVersion = null, string? UpdateDownloadUrl = null);
 }

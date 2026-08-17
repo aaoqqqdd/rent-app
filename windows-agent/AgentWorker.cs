@@ -130,7 +130,7 @@ public sealed class AgentWorker : BackgroundService
         _bindingRevoked = false;
         File.Delete(_unboundPath);
         WriteAgentLog($"绑定成功：设备 ID={_deviceId}，网站序列号={_registeredSerialNumber}，本机序列号={_detectedSerialNumber}");
-        WriteDashboardSnapshot("已连接", null, null, null, false, ReadMemoryMb() / 1024d, GetStorageGb());
+        WriteDashboardSnapshot("已连接", null, null, null, null, false, ReadMemoryMb() / 1024d, GetStorageGb());
         _logger.LogInformation("Device registered as {DeviceId}", result.DeviceId);
     }
 
@@ -354,7 +354,8 @@ foreach ($app in $apps) {
         var startDate = _rental?.TryGetProperty("start_date", out var start) == true ? start.ToString() : null;
         var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
         var rentalId = _rental?.TryGetProperty("id", out var id) == true ? id.ToString() : null;
-        WriteDashboardSnapshot(_statusText, startDate, endDate, rentalId, false, null, null);
+        var rentalStatus = _rental?.TryGetProperty("status", out var status) == true ? status.ToString() : null;
+        WriteDashboardSnapshot(_statusText, rentalStatus, startDate, endDate, rentalId, false, null, null);
     }
 
     private object BuildInspectionSnapshot()
@@ -402,7 +403,8 @@ foreach ($app in $apps) {
         var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
         var rentalId = _rental?.TryGetProperty("id", out var id) == true ? id.ToString() : null;
         var rentalStarted = _rental.HasValue && string.Equals(_rental.Value.GetProperty("status").ToString(), "active", StringComparison.OrdinalIgnoreCase) && DateTime.TryParse(startDate, out var rentalStart) && rentalStart.Date <= RentalToday();
-        WriteDashboardSnapshot(_statusText, startDate, endDate, rentalId, rentalStarted, memory, storage);
+        var rentalStatus = _rental?.TryGetProperty("status", out var rentalStatusValue) == true ? rentalStatusValue.ToString() : null;
+        WriteDashboardSnapshot(_statusText, rentalStatus, startDate, endDate, rentalId, rentalStarted, memory, storage);
         SaveState();
         _logger.LogDebug("Current device state: {State}", state.ToString());
     }
@@ -418,11 +420,11 @@ foreach ($app in $apps) {
         _logger.LogWarning("Device binding was revoked by the server; automatic re-registration is disabled until a new installation/binding.");
     }
 
-    private void WriteDashboardSnapshot(string status, string? startDate, string? endDate, string? rentalId, bool protocolRequired, double? memoryGb, double? storageGb)
+    private void WriteDashboardSnapshot(string status, string? rentalStatus, string? startDate, string? endDate, string? rentalId, bool protocolRequired, double? memoryGb, double? storageGb)
     {
         var dashboardPath = Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json");
         var customerName = _rental?.TryGetProperty("customer_name", out var customer) == true ? customer.ToString() : null;
-        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, CustomerName = customerName, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ServerTime = _trustedServerTime, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, MessageTitle = _messageTitle, MessageBody = _messageBody, Version = _options.Version, LatestVersion = _latestVersion, UpdateDownloadUrl = _updateDownloadUrl, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
+        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, RentalStatus = rentalStatus, DeviceMode = _deviceMode, CustomerName = customerName, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ServerTime = _trustedServerTime, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, MessageTitle = _messageTitle, MessageBody = _messageBody, Version = _options.Version, LatestVersion = _latestVersion, UpdateDownloadUrl = _updateDownloadUrl, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
     }
 
     private static double GetStorageGb() => new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;

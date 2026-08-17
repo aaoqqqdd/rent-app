@@ -138,7 +138,14 @@ public sealed class AgentLeaseOverlayForm : Form
                     _tray.ShowBalloonTip(8000, data.MessageTitle ?? "租赁通知", data.MessageBody, ToolTipIcon.Info);
                 }
             }
-            ShowExpiry();
+            if (string.Equals(data.RentalStatus, "active", StringComparison.OrdinalIgnoreCase)) ShowExpiry();
+            else
+            {
+                _endDate = null;
+                var label = RentalStatusLabel(data.RentalStatus);
+                _lease.Text = label;
+                _tray.Text = $"PC Rental 设备管理 · {label}";
+            }
             if (string.Equals(data.DeviceMode, "maintenance", StringComparison.OrdinalIgnoreCase))
                 _lease.Text = "设备暂时暂停使用\r\n请联系管理员或客服";
         }
@@ -190,7 +197,8 @@ public sealed class AgentLeaseOverlayForm : Form
         _tray.Text = $"PC Rental 设备管理 · 剩余 {remaining} · 到期 {_endDate:yyyy-MM-dd}";
     }
 
-    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, string? RentalId, string? ServerTime, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus, string? MessageTitle = null, string? MessageBody = null);
+    private static string RentalStatusLabel(string? status) => status?.ToLowerInvariant() switch { "pending" or "pending_payment" or "pending_approval" => "PENDING: 待处理", "awaiting_signature" => "AWAITING_SIGNATURE: 待签合同", "paid" or "approved" => "CONFIRMED: 租赁已确认，等待开始", "pending_pickup" => "READY_FOR_PICKUP: 待取货", "active" => "ACTIVE: 租赁中", "extended" => "EXTENDED: 已延期 / 租赁中", "overdue" => "OVERDUE: 已逾期", "suspended" => "SUSPENDED: 已暂停", "pending_return" => "RETURN_PENDING: 待归还", "returned" => "RETURNED: 已归还", "completed" => "COMPLETED: 已完成", "cancelled" => "CANCELLED: 已取消", _ => "暂无租赁状态" };
+    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, string? RentalId, string? ServerTime, bool ProtocolRequired, double MemoryGb, double StorageGb, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus, string? RentalStatus = null, string? MessageTitle = null, string? MessageBody = null);
 
     protected override void Dispose(bool disposing)
     {
