@@ -27,6 +27,8 @@ public sealed class AgentWorker : BackgroundService
     private string _statusText = "正在连接";
     private JsonElement? _rental;
     private DateTime _lastUpdateCheck = DateTime.MinValue;
+    private string? _latestVersion;
+    private string? _updateDownloadUrl;
     private int _consecutiveFailures;
     private bool _bindingRevoked;
     private string? _deviceId;
@@ -237,6 +239,7 @@ public sealed class AgentWorker : BackgroundService
         if (!create) await RunNetAsync("user", username, "/delete");
         await RunNetAsync("user", username, password, "/add", "/y");
         await RunNetAsync("localgroup", "Users", username, "/add");
+        await InstallRentalShortcutsAsync(username);
     }
 
     private static async Task DeleteRentalUserAsync(JsonElement payload)
@@ -259,6 +262,52 @@ public sealed class AgentWorker : BackgroundService
         if (!process.Start()) throw new InvalidOperationException("无法启动 Windows 账户命令");
         await process.WaitForExitAsync();
         if (process.ExitCode != 0) throw new InvalidOperationException((await process.StandardError.ReadToEndAsync()).Trim() is { Length: > 0 } error ? error : "Windows 账户命令执行失败");
+    }
+
+    private static async Task InstallRentalShortcutsAsync(string username)
+    {
+        // Copy installed shortcuts from the public desktop/start menu. Missing apps are
+        // intentionally ignored so account provisioning remains successful.
+        const string script = @"
+$ErrorActionPreference = 'SilentlyContinue'
+$user = $env:RENTAL_USER
+$desktop = Join-Path $env:SystemDrive ('Users\' + $user + '\Desktop')
+New-Item -ItemType Directory -Path $desktop -Force | Out-Null
+$roots = @(
+  (Join-Path $env:PUBLIC 'Desktop'),
+  (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'),
+  (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs')
+)
+$apps = @(
+  @{ Name = 'ToDesk'; Patterns = @('*ToDesk*.lnk', '*ToDesk*.url') },
+  @{ Name = '微信'; Patterns = @('*微信*.lnk', '*WeChat*.lnk', '*Weixin*.lnk') },
+  @{ Name = 'Safe Exam Browser'; Patterns = @('*Safe*Exam*Browser*.lnk', '*SEB*.lnk') },
+  @{ Name = 'Google Chrome'; Patterns = @('*Google Chrome*.lnk', '*Chrome*.lnk') }
+)
+foreach ($app in $apps) {
+  $source = $null
+  foreach ($root in $roots) {
+    foreach ($pattern in $app.Patterns) {
+      $source = Get-ChildItem -Path $root -Filter $pattern -File -Recurse | Select-Object -First 1
+      if ($source) { break }
+    }
+    if ($source) { break }
+  }
+  if ($source) { Copy-Item $source.FullName (Join-Path $desktop $source.Name) -Force }
+}
+";
+        var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+        using var process = new Process { StartInfo = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } };
+        process.StartInfo.ArgumentList.Add("-NoProfile");
+        process.StartInfo.ArgumentList.Add("-NonInteractive");
+        process.StartInfo.ArgumentList.Add("-ExecutionPolicy");
+        process.StartInfo.ArgumentList.Add("Bypass");
+        process.StartInfo.ArgumentList.Add("-EncodedCommand");
+        process.StartInfo.ArgumentList.Add(encoded);
+        process.StartInfo.Environment["RENTAL_USER"] = username;
+        if (!process.Start()) return;
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0) WriteAgentLog($"租户桌面快捷方式复制失败：{(await process.StandardError.ReadToEndAsync()).Trim()}");
     }
 
     private async Task WriteRefreshRequestAsync()
@@ -345,7 +394,7 @@ public sealed class AgentWorker : BackgroundService
     private void WriteDashboardSnapshot(string status, string? startDate, string? endDate, string? rentalId, bool protocolRequired, double? memoryGb, double? storageGb)
     {
         var dashboardPath = Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json");
-        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ServerTime = _trustedServerTime, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, MessageTitle = _messageTitle, MessageBody = _messageBody, Version = _options.Version, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
+        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ServerTime = _trustedServerTime, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, MessageTitle = _messageTitle, MessageBody = _messageBody, Version = _options.Version, LatestVersion = _latestVersion, UpdateDownloadUrl = _updateDownloadUrl, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
     }
 
     private static double GetStorageGb() => new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;
@@ -378,6 +427,9 @@ public sealed class AgentWorker : BackgroundService
                 ?? release.Assets?.FirstOrDefault(item => string.Equals(item.Name, _options.GitHubReleaseAsset, StringComparison.OrdinalIgnoreCase))
                 ?? release.Assets?.FirstOrDefault(item => item.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
             if (asset is null || string.IsNullOrWhiteSpace(asset.BrowserDownloadUrl)) return;
+            _latestVersion = version;
+            _updateDownloadUrl = $"https://github.com/{_options.GitHubRepository}/releases/tag/v{version}";
+            WriteDashboardSnapshotFromCurrentState();
             var updateDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "Updates");
             Directory.CreateDirectory(updateDirectory);
             var pending = Path.Combine(updateDirectory, "RentDeviceAgent.new.exe");
