@@ -403,7 +403,7 @@ foreach ($app in $apps) {
         var endDate = _rental?.TryGetProperty("end_date", out var end) == true ? end.ToString() : null;
         var rentalId = _rental?.TryGetProperty("id", out var id) == true ? id.ToString() : null;
         var rentalStarted = _rental.HasValue && string.Equals(_rental.Value.GetProperty("status").ToString(), "active", StringComparison.OrdinalIgnoreCase) && DateTime.TryParse(startDate, out var rentalStart) && rentalStart.Date <= RentalToday();
-        var rentalStatus = _rental?.TryGetProperty("status", out var rentalStatusValue) == true ? rentalStatusValue.ToString() : null;
+        var rentalStatus = _rental?.TryGetProperty("rental_status", out var rentalStatusValue) == true ? rentalStatusValue.ToString() : (_rental?.TryGetProperty("status", out var legacyStatus) == true ? legacyStatus.ToString() : null);
         WriteDashboardSnapshot(_statusText, rentalStatus, startDate, endDate, rentalId, rentalStarted, memory, storage);
         SaveState();
         _logger.LogDebug("Current device state: {State}", state.ToString());
