@@ -213,12 +213,52 @@ public sealed class AgentWorker : BackgroundService
                             var title = commandPayload.TryGetProperty("title", out var titleValue) ? titleValue.ToString() : "租赁通知";
                             var body = commandPayload.TryGetProperty("message", out var bodyValue) ? bodyValue.ToString() : "您收到一条租赁通知。";
                             _messageTitle = title[..Math.Min(title.Length, 120)]; _messageBody = body[..Math.Min(body.Length, 500)]; WriteDashboardSnapshotFromCurrentState(); WriteAgentLog($"收到通知：{title} - {body}".Replace("\r", " ").Replace("\n", " ")); resultCode = "MESSAGE_RECEIVED"; message = "通知已显示"; success = true; break;
+                        case AgentCommandType.CREATE_RENTAL_USER:
+                        case AgentCommandType.UPDATE_RENTAL_USER:
+                            await ApplyRentalUserAsync(commandPayload, type == AgentCommandType.CREATE_RENTAL_USER);
+                            resultCode = type == AgentCommandType.CREATE_RENTAL_USER ? "RENTAL_USER_CREATED" : "RENTAL_USER_UPDATED";
+                            message = "Windows 租户账户已更新"; success = true; break;
+                        case AgentCommandType.DELETE_RENTAL_USER:
+                            await DeleteRentalUserAsync(commandPayload);
+                            resultCode = "RENTAL_USER_DELETED"; message = "Windows 租户账户已删除"; success = true; break;
                     }
                 }
             }
             catch (Exception ex) { message = ex.Message; WriteAgentLog($"命令 {command.Id} 执行失败：{ex.Message}"); }
             await ReportCommandResultAsync(command.Id, success, resultCode, message, cancellationToken);
         }
+    }
+
+    private static async Task ApplyRentalUserAsync(JsonElement payload, bool create)
+    {
+        var username = SafeWindowsUsername(payload.TryGetProperty("username", out var name) ? name.ToString() : "");
+        var password = payload.TryGetProperty("password", out var pass) ? pass.ToString() : "";
+        if (string.IsNullOrWhiteSpace(username) || username.Equals("Admin", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(password)) throw new InvalidOperationException("租户账户资料无效");
+        if (!create) await RunNetAsync("user", username, "/delete");
+        await RunNetAsync("user", username, password, "/add", "/y");
+        await RunNetAsync("localgroup", "Users", username, "/add");
+    }
+
+    private static async Task DeleteRentalUserAsync(JsonElement payload)
+    {
+        var username = SafeWindowsUsername(payload.TryGetProperty("username", out var name) ? name.ToString() : "");
+        if (string.IsNullOrWhiteSpace(username) || username.Equals("Admin", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("禁止删除管理员账户");
+        await RunNetAsync("user", username, "/delete");
+    }
+
+    private static string SafeWindowsUsername(string value)
+    {
+        var clean = new string(value.Trim().Where(char.IsLetterOrDigit).ToArray());
+        return clean.Length switch { 0 => "RentalUser", _ => clean[..Math.Min(clean.Length, 20)] };
+    }
+
+    private static async Task RunNetAsync(params string[] args)
+    {
+        using var process = new Process { StartInfo = new ProcessStartInfo("net.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } };
+        foreach (var arg in args) process.StartInfo.ArgumentList.Add(arg);
+        if (!process.Start()) throw new InvalidOperationException("无法启动 Windows 账户命令");
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0) throw new InvalidOperationException((await process.StandardError.ReadToEndAsync()).Trim() is { Length: > 0 } error ? error : "Windows 账户命令执行失败");
     }
 
     private async Task WriteRefreshRequestAsync()
@@ -495,7 +535,7 @@ public sealed class AgentWorker : BackgroundService
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
     private sealed record CommandEnvelope(bool Ok, DeviceCommand[] Commands);
     private sealed record DeviceCommand(string Id, string DeviceId, string CommandType, string Payload, string Status, string CreatedAt, string ExpiresAt);
-    private enum AgentCommandType { SYNC, SHOW_MESSAGE, PAUSE_RENTAL, RESUME_RENTAL, REFRESH_DEVICE_INFO, CHECK_UPDATE }
+    private enum AgentCommandType { SYNC, SHOW_MESSAGE, PAUSE_RENTAL, RESUME_RENTAL, REFRESH_DEVICE_INFO, CHECK_UPDATE, CREATE_RENTAL_USER, UPDATE_RENTAL_USER, DELETE_RENTAL_USER }
     private sealed record GitHubRelease(string TagName, GitHubAsset[]? Assets);
     private sealed record GitHubAsset(string Name, string BrowserDownloadUrl);
 
