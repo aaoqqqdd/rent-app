@@ -107,7 +107,7 @@ public sealed class AgentDashboardForm : Form
 
             _status.Text = string.IsNullOrWhiteSpace(data.Status) ? "已连接，等待状态" : data.Status;
             var greeting = Controls.Find("dashboardGreeting", true).FirstOrDefault() as Label;
-            if (greeting is not null) greeting.Text = string.IsNullOrWhiteSpace(data.CustomerName) ? "我的租赁设备" : $"你好，{data.CustomerName}";
+            if (greeting is not null) greeting.Text = string.IsNullOrWhiteSpace(data.CustomerName) ? "你好" : $"你好，{data.CustomerName}";
             _status.ForeColor = data.Status?.Contains("失败", StringComparison.OrdinalIgnoreCase) == true || data.Status?.Contains("无法", StringComparison.OrdinalIgnoreCase) == true ? Color.FromArgb(248, 113, 113) : Mint;
             _deviceId.Text = string.IsNullOrWhiteSpace(data.DeviceId) ? "未绑定" : "已绑定";
             _rental.Text = data.EndDate is null ? "暂无租期" : $"开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate}";
