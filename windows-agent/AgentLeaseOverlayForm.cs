@@ -12,6 +12,8 @@ public sealed class AgentLeaseOverlayForm : Form
     private Button? _bindButton;
     private DateTime? _endDate;
     private DateTime? _serverDate;
+    private string _lastReminder = "";
+    private string _lastMessage = "";
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
 
     public AgentLeaseOverlayForm()
@@ -110,7 +112,18 @@ public sealed class AgentLeaseOverlayForm : Form
             }
             _endDate = DateTime.TryParse(data.EndDate, out var endDate) ? endDate.Date : null;
             _serverDate = DateTimeOffset.TryParse(data.ServerTime, out var serverTime) ? serverTime.UtcDateTime.Date : null;
+            if (!string.IsNullOrWhiteSpace(data.MessageBody))
+            {
+                var messageKey = $"{data.MessageTitle}|{data.MessageBody}";
+                if (_lastMessage != messageKey)
+                {
+                    _lastMessage = messageKey;
+                    _tray.ShowBalloonTip(8000, data.MessageTitle ?? "租赁通知", data.MessageBody, ToolTipIcon.Info);
+                }
+            }
             ShowExpiry();
+            if (string.Equals(data.DeviceMode, "maintenance", StringComparison.OrdinalIgnoreCase))
+                _lease.Text = "设备暂时暂停使用\r\n请联系管理员或客服";
         }
         catch { _lease.Text = "租期：暂时无法读取"; }
     }
@@ -141,12 +154,21 @@ public sealed class AgentLeaseOverlayForm : Form
             _tray.Text = "PC Rental 设备管理 · 到期：暂无租期";
             return;
         }
-        var remaining = _endDate.Value < (_serverDate ?? DateTime.Now.Date) ? "已到期" : $"{(_endDate.Value - (_serverDate ?? DateTime.Now.Date)).Days} 天";
+        var today = _serverDate ?? DateTime.Now.Date;
+        var days = (_endDate.Value - today).Days;
+        var remaining = _endDate.Value < today ? "已到期" : $"{days} 天";
+        var reminder = days <= 0 ? "expired" : days <= 1 ? "24h" : days <= 3 ? "72h" : "";
+        if (!string.IsNullOrEmpty(reminder) && _lastReminder != reminder)
+        {
+            _lastReminder = reminder;
+            var text = reminder == "expired" ? "租赁期限已结束，请联系管理员安排归还。" : $"租赁将在 {(_endDate.Value - today).Days} 天内到期，请提前准备归还。";
+            _tray.ShowBalloonTip(8000, "租期提醒", text, reminder == "expired" ? ToolTipIcon.Warning : ToolTipIcon.Info);
+        }
         _lease.Text = $"剩余时间：{remaining}\r\n到期时间：{_endDate:yyyy-MM-dd}";
         _tray.Text = $"PC Rental 设备管理 · 剩余 {remaining} · 到期 {_endDate:yyyy-MM-dd}";
     }
 
-    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, string? RentalId, string? ServerTime, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus);
+    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, string? RentalId, string? ServerTime, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? BindingStatus, string? MessageTitle = null, string? MessageBody = null);
 
     protected override void Dispose(bool disposing)
     {

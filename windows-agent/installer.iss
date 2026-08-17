@@ -1,6 +1,6 @@
 #define AppName "PC Rental 设备管理"
 #ifndef AppVersion
-  #define AppVersion "0.11.21"
+  #define AppVersion "1.0.0"
 #endif
 #define AppPublisher "PC Rental"
 #define AppExeName "RentDeviceAgent.exe"
