@@ -76,9 +76,20 @@ Invoke-Sc @('failureflag', $serviceName, '1')
 # restores it after a normal logout/login cycle without granting the renter admin rights.
 $runKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
 New-ItemProperty -Path $runKey -Name "PC Rental Device Agent UI" -Value "`"$exe`" --ui" -PropertyType String -Force | Out-Null
-# Older installers also created a Startup-folder shortcut, which launched a duplicate UI.
-$legacyStartupShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonStartup)) "PC Rental 设备管理.lnk"
-Remove-Item $legacyStartupShortcut -Force -ErrorAction SilentlyContinue
+# Keep a second, explicit all-users startup entry. It points directly to the EXE
+# and avoids Windows environments that ignore HKLM Run entries.
+$commonStartup = [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonStartup)
+$uiShortcut = Join-Path $commonStartup "PC Rental 设备管理.lnk"
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($uiShortcut)
+$shortcut.TargetPath = $exe
+$shortcut.Arguments = '--ui'
+$shortcut.WorkingDirectory = $InstallPath
+$shortcut.Description = 'PC Rental 设备管理客户端'
+$shortcut.Save()
+# Remove only the per-user legacy shortcut; the public shortcut above is intentional.
+$userStartupShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)) "PC Rental 设备管理.lnk"
+Remove-Item $userStartupShortcut -Force -ErrorAction SilentlyContinue
 Start-Service $serviceName
 if ((Get-Service -Name $serviceName).Status -ne 'Running') { throw "服务已注册但未能进入 Running 状态" }
 Write-Host "Installed and started $serviceName"

@@ -240,6 +240,9 @@ public sealed class AgentWorker : BackgroundService
         if (string.IsNullOrWhiteSpace(username) || username.Equals("Admin", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(password)) throw new InvalidOperationException("租户账户资料无效");
         if (!create) await RunNetAsync("user", username, "/delete");
         await RunNetAsync("user", username, password, "/add", "/y");
+        // Explicitly remove elevated membership even when Windows reused an existing
+        // local account or an old provisioning attempt added it to Administrators.
+        await RunNetBestEffortAsync("localgroup", "Administrators", username, "/delete");
         await RunNetAsync("localgroup", "Users", username, "/add");
         await InstallRentalShortcutsAsync(username);
     }
@@ -266,6 +269,11 @@ public sealed class AgentWorker : BackgroundService
         if (process.ExitCode != 0) throw new InvalidOperationException((await process.StandardError.ReadToEndAsync()).Trim() is { Length: > 0 } error ? error : "Windows 账户命令执行失败");
     }
 
+    private static async Task RunNetBestEffortAsync(params string[] args)
+    {
+        try { await RunNetAsync(args); } catch { }
+    }
+
     private static async Task InstallRentalShortcutsAsync(string username)
     {
         // Copy installed shortcuts from the public desktop/start menu. Missing apps are
@@ -275,6 +283,19 @@ $ErrorActionPreference = 'SilentlyContinue'
 $user = $env:RENTAL_USER
 $desktop = Join-Path $env:SystemDrive ('Users\' + $user + '\Desktop')
 New-Item -ItemType Directory -Path $desktop -Force | Out-Null
+$templateDesktops = @(
+  (Join-Path $env:SystemDrive 'Users\Admin\Desktop'),
+  (Join-Path $env:SystemDrive 'Users\Administrator\Desktop')
+)
+# Use the first available administrator desktop as the tenant desktop template.
+foreach ($template in $templateDesktops) {
+  if (Test-Path $template) {
+    Get-ChildItem -Path $template -Force | ForEach-Object {
+      Copy-Item $_.FullName (Join-Path $desktop $_.Name) -Recurse -Force
+    }
+    break
+  }
+}
 $roots = @(
   (Join-Path $env:PUBLIC 'Desktop'),
   (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'),

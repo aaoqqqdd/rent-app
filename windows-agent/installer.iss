@@ -95,6 +95,7 @@ Filename: "sc.exe"; Parameters: "delete RentDeviceAgent"; Flags: runhidden waitu
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{commonappdata}\RentDeviceAgent"
+Type: files; Name: "{commonstartup}\PC Rental 设备管理.lnk"
 
 [Registry]
 ; HKLM Run applies to every Windows user who signs in, not only the administrator who installed it.

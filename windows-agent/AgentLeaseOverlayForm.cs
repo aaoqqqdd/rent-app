@@ -10,6 +10,7 @@ public sealed class AgentLeaseOverlayForm : Form
     private ToolStripMenuItem? _toggleOverlay;
     private ToolStripMenuItem? _bindMenuItem;
     private Button? _bindButton;
+    private AgentDashboardForm? _dashboard;
     private DateTime? _endDate;
     private DateTime? _serverDate;
     private string _lastReminder = "";
@@ -80,9 +81,25 @@ public sealed class AgentLeaseOverlayForm : Form
 
     private void ShowMainPanel()
     {
-        using var form = new AgentDashboardForm();
-        form.FormClosed += (_, _) => MessageBox.Show("主面板已关闭。您可以从任务栏托盘图标重新打开主面板。", "PC Rental 设备管理", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        form.ShowDialog(this);
+        if (_dashboard is not null && !_dashboard.IsDisposed)
+        {
+            _dashboard.Show();
+            _dashboard.WindowState = FormWindowState.Normal;
+            _dashboard.Activate();
+            return;
+        }
+        _dashboard = new AgentDashboardForm();
+        _dashboard.FormClosed += (_, _) => _dashboard = null;
+        _dashboard.FormClosing += (_, e) =>
+        {
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                // Closing the main window also hides the floating lease window;
+                // the tray icon and background service remain available.
+                Hide();
+            }
+        };
+        _dashboard.Show(this);
     }
 
     private void RefreshSnapshot()
@@ -132,9 +149,14 @@ public sealed class AgentLeaseOverlayForm : Form
     {
         try
         {
+            var startupShortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "PC Rental 设备管理.lnk");
+            File.Delete(startupShortcut);
+            var executable = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(executable) || !executable.EndsWith("RentDeviceAgent.exe", StringComparison.OrdinalIgnoreCase)) return;
             using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)
                 ?? Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-            key?.SetValue("PC Rental Device Agent UI", $"\"{Application.ExecutablePath}\" --ui");
+            key?.DeleteValue("PC Rental Device Agent UI", false);
+            key?.SetValue("PC Rental Device Agent UI", $"\"{executable}\" --ui");
         }
         catch { }
     }
@@ -172,7 +194,11 @@ public sealed class AgentLeaseOverlayForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _timer.Dispose(); _tray.Visible = false; _tray.Dispose(); }
+        if (disposing)
+        {
+            if (_dashboard is not null && !_dashboard.IsDisposed) _dashboard.Close();
+            _timer.Dispose(); _tray.Visible = false; _tray.Dispose();
+        }
         base.Dispose(disposing);
     }
 }
