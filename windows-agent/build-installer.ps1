@@ -20,8 +20,8 @@ $settings = @{ RentDeviceAgent = @{ ApiBaseUrl = $ApiBaseUrl; SerialNumber = $Se
 Set-Content (Join-Path $root "appsettings.json") $settings -Encoding UTF8
 
 Remove-Item $publish -Recurse -Force -ErrorAction SilentlyContinue
-dotnet publish (Join-Path $root "RentDeviceAgent.csproj") -c Release -r win-x64 --self-contained false -p:SelfContained=false -p:PublishSingleFile=true -o $publish
-dotnet publish (Join-Path $root "RentDeviceAgent.Updater.csproj") -c Release -r win-x64 --self-contained false -p:SelfContained=false -p:PublishSingleFile=true -o $publish
+dotnet publish (Join-Path $root "RentDeviceAgent.csproj") -c Release -r win-x64 --self-contained true -p:SelfContained=true -p:PublishSingleFile=true -p:PublishTrimmed=false -o $publish
+dotnet publish (Join-Path $root "RentDeviceAgent.Updater.csproj") -c Release -r win-x64 --self-contained true -p:SelfContained=true -p:PublishSingleFile=true -p:PublishTrimmed=false -o $publish
 
 if (Get-Command iscc -ErrorAction SilentlyContinue) {
   iscc (Join-Path $root "installer.iss")

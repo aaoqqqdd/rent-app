@@ -18,11 +18,14 @@ try
         stop?.WaitForExit(15000);
         await Task.Delay(2500);
     }
+    await StopTargetProcessesAsync(target);
+    var copied = false;
     for (var i = 0; i < 15; i++)
     {
-        try { File.Copy(pending, target, true); File.Delete(pending); break; }
+        try { File.Copy(pending, target, true); copied = true; File.Delete(pending); break; }
         catch when (i < 14) { await Task.Delay(1000); }
     }
+    if (!copied) throw new IOException("无法替换正在使用的客户端文件，请稍后重试");
     var settingsPath = Path.Combine(Path.GetDirectoryName(target)!, "appsettings.json");
     if (File.Exists(settingsPath) && !string.IsNullOrWhiteSpace(version))
     {
@@ -41,4 +44,25 @@ try
 catch (Exception ex)
 {
     MessageBox.Show($"更新失败：{ex.Message}", "PC Rental 软件更新", MessageBoxButtons.OK, MessageBoxIcon.Error);
+}
+
+static async Task StopTargetProcessesAsync(string targetPath)
+{
+    var fullTarget = Path.GetFullPath(targetPath);
+    foreach (var process in Process.GetProcesses())
+    {
+        try
+        {
+            if (process.Id == Environment.ProcessId || process.HasExited) continue;
+            var processPath = process.MainModule?.FileName;
+            if (!string.Equals(processPath, fullTarget, StringComparison.OrdinalIgnoreCase)) continue;
+            process.CloseMainWindow();
+            if (!process.WaitForExit(5000)) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+        }
+        catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
+        finally { process.Dispose(); }
+    }
+    await Task.Delay(500);
 }
