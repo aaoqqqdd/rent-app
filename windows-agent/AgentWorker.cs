@@ -421,7 +421,8 @@ foreach ($app in $apps) {
     private void WriteDashboardSnapshot(string status, string? startDate, string? endDate, string? rentalId, bool protocolRequired, double? memoryGb, double? storageGb)
     {
         var dashboardPath = Path.Combine(Path.GetDirectoryName(_statePath)!, "dashboard.json");
-        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ServerTime = _trustedServerTime, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, MessageTitle = _messageTitle, MessageBody = _messageBody, Version = _options.Version, LatestVersion = _latestVersion, UpdateDownloadUrl = _updateDownloadUrl, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
+        var customerName = _rental?.TryGetProperty("customer_name", out var customer) == true ? customer.ToString() : null;
+        File.WriteAllText(dashboardPath, JsonSerializer.Serialize(new { Status = status, DeviceMode = _deviceMode, CustomerName = customerName, StartDate = startDate, EndDate = endDate, RentalId = rentalId, ServerTime = _trustedServerTime, ProtocolRequired = protocolRequired, MemoryGb = memoryGb ?? 0, StorageGb = storageGb ?? 0, MessageTitle = _messageTitle, MessageBody = _messageBody, Version = _options.Version, LatestVersion = _latestVersion, UpdateDownloadUrl = _updateDownloadUrl, DeviceId = _deviceId, RegisteredSerialNumber = _registeredSerialNumber, DetectedSerialNumber = _detectedSerialNumber, ApiBaseUrl = _options.ApiBaseUrl, UpdatedAt = DateTime.Now }));
     }
 
     private static double GetStorageGb() => new DriveInfo(Path.GetPathRoot(Environment.SystemDirectory)!).AvailableFreeSpace / 1073741824d;

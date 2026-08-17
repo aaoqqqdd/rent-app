@@ -39,7 +39,7 @@ public sealed class AgentDashboardForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55)); layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var eyebrow = LabelFor("PC RENTAL / DEVICE AGENT", 9, FontStyle.Bold); eyebrow.ForeColor = Mint; eyebrow.Margin = new Padding(0, 0, 0, 3);
-        var title = LabelFor("我的租赁设备", 25, FontStyle.Bold); title.Margin = new Padding(0); layout.Controls.Add(eyebrow, 0, 0); layout.Controls.Add(title, 0, 1);
+        var title = LabelFor("我的租赁设备", 25, FontStyle.Bold); title.Name = "dashboardGreeting"; title.Margin = new Padding(0); layout.Controls.Add(eyebrow, 0, 0); layout.Controls.Add(title, 0, 1);
         var button = ActionButton("打开客户面板  [F1]", Blue); button.AutoSize = false; button.Dock = DockStyle.Fill; button.Margin = new Padding(12, 0, 0, 8); button.Click += (_, _) => OpenCustomerPanel(); layout.Controls.Add(button, 1, 1); return layout;
     }
 
@@ -106,6 +106,8 @@ public sealed class AgentDashboardForm : Form
             }
 
             _status.Text = string.IsNullOrWhiteSpace(data.Status) ? "已连接，等待状态" : data.Status;
+            var greeting = Controls.Find("dashboardGreeting", true).FirstOrDefault() as Label;
+            if (greeting is not null) greeting.Text = string.IsNullOrWhiteSpace(data.CustomerName) ? "我的租赁设备" : $"你好，{data.CustomerName}";
             _status.ForeColor = data.Status?.Contains("失败", StringComparison.OrdinalIgnoreCase) == true || data.Status?.Contains("无法", StringComparison.OrdinalIgnoreCase) == true ? Color.FromArgb(248, 113, 113) : Mint;
             _deviceId.Text = string.IsNullOrWhiteSpace(data.DeviceId) ? "未绑定" : "已绑定";
             _rental.Text = data.EndDate is null ? "暂无租期" : $"开始：{data.StartDate ?? "—"}  ·  到期：{data.EndDate}";
@@ -141,5 +143,5 @@ public sealed class AgentDashboardForm : Form
     private static Label LabelFor(string text, float size = 15, FontStyle style = FontStyle.Regular) => new() { Text = text, AutoSize = true, Font = new Font("Microsoft YaHei UI", size, style), ForeColor = Color.White };
     private static Label ValueLabel(string text) => LabelFor(text, 14, FontStyle.Bold);
     private static Button ActionButton(string text, Color background) => new() { Text = text, AutoSize = true, Height = 34, FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 }, BackColor = background, ForeColor = Color.White, Padding = new Padding(14, 0, 14, 0), Cursor = Cursors.Hand };
-    private sealed record Snapshot(string Status, string DeviceMode, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? DeviceId = null, string? RegisteredSerialNumber = null, string? DetectedSerialNumber = null, string? LatestVersion = null, string? UpdateDownloadUrl = null);
+    private sealed record Snapshot(string Status, string DeviceMode, string? CustomerName, string? StartDate, string? EndDate, bool ProtocolRequired, double MemoryGb, double StorageGb, string Version, DateTime UpdatedAt, string? ApiBaseUrl, string? DeviceId = null, string? RegisteredSerialNumber = null, string? DetectedSerialNumber = null, string? LatestVersion = null, string? UpdateDownloadUrl = null);
 }
