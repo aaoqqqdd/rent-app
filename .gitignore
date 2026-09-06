@@ -1,5 +1,6 @@
 windows-agent/bin/
 windows-agent/obj/
+windows-agent/Assets/
 windows-agent/publish/
 windows-agent/output/
 windows-agent/release/

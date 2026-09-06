@@ -23,6 +23,12 @@ Remove-Item $publish -Recurse -Force -ErrorAction SilentlyContinue
 dotnet publish (Join-Path $root "RentDeviceAgent.csproj") -c Release -r win-x64 --self-contained true -p:SelfContained=true -p:PublishSingleFile=true -p:PublishTrimmed=false -o $publish
 dotnet publish (Join-Path $root "RentDeviceAgent.Updater.csproj") -c Release -r win-x64 --self-contained true -p:SelfContained=true -p:PublishSingleFile=true -p:PublishTrimmed=false -o $publish
 
+try {
+  & (Join-Path $root "tools\make-installer-assets.ps1")
+} catch {
+  Write-Warning "生成安装器素材失败，将使用 Inno Setup 默认外观：$($_.Exception.Message)"
+}
+
 if (Get-Command iscc -ErrorAction SilentlyContinue) {
   iscc (Join-Path $root "installer.iss")
   Write-Host "安装包已生成到 $root\output"
