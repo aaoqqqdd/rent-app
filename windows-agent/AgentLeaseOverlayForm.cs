@@ -16,6 +16,7 @@ public sealed class AgentLeaseOverlayForm : Form
     private string _lastReminder = "";
     private string _lastMessage = "";
     private static readonly string SnapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "dashboard.json");
+    private static readonly string UpdatingFlagPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "updating.flag");
 
     public AgentLeaseOverlayForm()
     {
@@ -66,7 +67,14 @@ public sealed class AgentLeaseOverlayForm : Form
         _bindMenuItem.Click += (_, _) => bind.PerformClick();
         _tray.ContextMenuStrip.Items.Add(_bindMenuItem);
         _tray.DoubleClick += (_, _) => { Show(); Activate(); };
-        FormClosing += (_, e) => e.Cancel = IsBound();
+        FormClosing += (_, e) =>
+        {
+            // A bound device must keep running. The only sanctioned way out is an
+            // in-progress update (the updater/worker drops updating.flag before it
+            // swaps the executable) or the OS shutting Windows down.
+            if (e.CloseReason is CloseReason.WindowsShutDown or CloseReason.ApplicationExitCall) return;
+            e.Cancel = IsBound() && !IsUpdating();
+        };
         _timer.Tick += (_, _) => RefreshSnapshot();
         EnsureUserStartupEntry();
         _timer.Start();
@@ -173,6 +181,21 @@ public sealed class AgentLeaseOverlayForm : Form
         var statePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "state.json");
         var unboundPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "RentDeviceAgent", "unbound.flag");
         return File.Exists(statePath) && !File.Exists(unboundPath);
+    }
+
+    private static bool IsUpdating()
+    {
+        try
+        {
+            if (!File.Exists(UpdatingFlagPath)) return false;
+            // Ignore a stale flag left behind by a crashed update so the window
+            // can never be closed forever by a leftover file.
+            var started = DateTime.TryParse(File.ReadAllText(UpdatingFlagPath).Trim(), null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed)
+                ? parsed.ToUniversalTime()
+                : File.GetLastWriteTimeUtc(UpdatingFlagPath);
+            return DateTime.UtcNow - started < TimeSpan.FromMinutes(10);
+        }
+        catch { return false; }
     }
 
     private void ShowExpiry()

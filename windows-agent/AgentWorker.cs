@@ -22,6 +22,12 @@ public sealed class AgentWorker : BackgroundService
     private readonly string _refreshRequestPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "RentDeviceAgent", "refresh-request");
+    private readonly string _cleanupFlagPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "RentDeviceAgent", "cleanup-done.flag");
+    private readonly string _updatingFlagPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "RentDeviceAgent", "updating.flag");
     private string? _token;
     private string _deviceMode = "normal";
     private bool _beforeSnapshotSent;
@@ -39,6 +45,7 @@ public sealed class AgentWorker : BackgroundService
     private string? _lastInspectionType;
     private string? _messageTitle;
     private string? _messageBody;
+    private static Mutex? _workerSingleton;
 
     public AgentWorker(IHttpClientFactory httpClientFactory, IOptions<AgentOptions> options, ILogger<AgentWorker> logger)
     {
@@ -50,6 +57,19 @@ public sealed class AgentWorker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_statePath)!);
+
+        // Exactly one worker may register, heartbeat, check for updates and own
+        // state.json on this machine. The Windows service is the primary; a
+        // UI-hosted fallback (or a second logon session) must stand down rather
+        // than run a duplicate that double-registers and fights over the files.
+        if (!TryBecomeSingletonWorker())
+        {
+            _logger.LogWarning("Another Rent Device Agent worker already holds the singleton lock; this instance stays idle.");
+            WriteAgentLog("检测到已有客户端后台在运行，本实例保持空闲，避免重复注册与双进程。");
+            try { await Task.Delay(Timeout.Infinite, stoppingToken); } catch (OperationCanceledException) { }
+            return;
+        }
+
         LoadState();
         _bindingRevoked = File.Exists(_unboundPath);
         _logger.LogInformation("Rent Device Agent started");
@@ -85,6 +105,23 @@ public sealed class AgentWorker : BackgroundService
                 : Math.Min(300, Math.Max(5, 5 * (1 << Math.Min(_consecutiveFailures - 1, 5))));
             try { await WaitForNextCycleAsync(seconds, stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        }
+    }
+
+    private static bool TryBecomeSingletonWorker()
+    {
+        try
+        {
+            // Kept in a static field for the process lifetime; the OS releases it on exit.
+            _workerSingleton = new Mutex(false, @"Global\RentDeviceAgent.Worker");
+            try { return _workerSingleton.WaitOne(TimeSpan.FromSeconds(2)); }
+            catch (AbandonedMutexException) { return true; } // previous holder crashed; it's ours now
+        }
+        catch
+        {
+            // Never block the only worker over a mutex/ACL failure.
+            _workerSingleton = null;
+            return true;
         }
     }
 
@@ -173,6 +210,7 @@ public sealed class AgentWorker : BackgroundService
         if (heartbeatResult?.Ok != true) throw new InvalidOperationException("网站未确认心跳");
         WriteAgentLog($"心跳成功：HTTP {(int)response.StatusCode}，设备 ID={_deviceId}");
         if (!string.IsNullOrWhiteSpace(heartbeatResult.DeviceMode)) _deviceMode = heartbeatResult.DeviceMode;
+        await MaybeRunLeaseEndCleanupAsync(heartbeatResult.CleanupRequested);
         if (_lastInspectionType != inspectionType && inspectionType != "automated_health")
         {
             await SendInspectionAsync(inspectionType, snapshot, cancellationToken);
@@ -229,6 +267,14 @@ public sealed class AgentWorker : BackgroundService
                         case AgentCommandType.DELETE_RENTAL_USER:
                             await DeleteRentalUserAsync(commandPayload);
                             resultCode = "RENTAL_USER_DELETED"; message = "Windows 租户账户已删除"; success = true; break;
+                        case AgentCommandType.CLEANUP_RENTAL_DATA:
+                            if (!_options.DataCleanup.Enabled) { resultCode = "CLEANUP_DISABLED"; message = "设备端已禁用数据清理"; break; }
+                            var cleanupUser = commandPayload.TryGetProperty("username", out var cleanupName) ? cleanupName.ToString() : null;
+                            var cleanupReport = await RentalDataCleaner.RunAsync(
+                                string.IsNullOrWhiteSpace(cleanupUser) ? null : cleanupUser,
+                                BuildCleanupSpec(commandPayload, removeProfile: false), WriteAgentLog);
+                            resultCode = cleanupReport.Failed == 0 ? "RENTAL_DATA_CLEANED" : "RENTAL_DATA_CLEANED_WITH_ERRORS";
+                            message = cleanupReport.Summary; success = cleanupReport.Failed == 0; break;
                     }
                 }
             }
@@ -242,7 +288,8 @@ public sealed class AgentWorker : BackgroundService
         var username = SafeWindowsUsername(payload.TryGetProperty("username", out var name) ? name.ToString() : "");
         var password = payload.TryGetProperty("password", out var pass) ? pass.ToString() : "";
         if (string.IsNullOrWhiteSpace(username) || username.Equals("Admin", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(password)) throw new InvalidOperationException("租户账户资料无效");
-        if (create || !await UserExistsAsync(username))
+        var accountExisted = await UserExistsAsync(username);
+        if (create || !accountExisted)
             await RunNetAsync("user", username, password, "/add", "/y");
         else
             await RunNetAsync("user", username, password);
@@ -250,14 +297,63 @@ public sealed class AgentWorker : BackgroundService
         // local account or an old provisioning attempt added it to Administrators.
         await RunNetBestEffortAsync("localgroup", "Administrators", username, "/delete");
         await RunNetAsync("localgroup", "Users", username, "/add");
-        await InstallRentalShortcutsAsync(username);
+        // Only seed the tenant desktop when the account is first created. A plain
+        // password change (UPDATE_RENTAL_USER on an existing account) must never
+        // re-copy the template desktop, or the tenant's own desktop changes get
+        // wiped every time the website rotates the password.
+        if (!accountExisted)
+            await InstallRentalShortcutsAsync(username);
     }
 
-    private static async Task DeleteRentalUserAsync(JsonElement payload)
+    private async Task DeleteRentalUserAsync(JsonElement payload)
     {
         var username = SafeWindowsUsername(payload.TryGetProperty("username", out var name) ? name.ToString() : "");
         if (string.IsNullOrWhiteSpace(username) || username.Equals("Admin", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("禁止删除管理员账户");
+        // Wipe the tenant's browser / WeChat / recycle-bin traces before the account and profile disappear.
+        if (_options.DataCleanup.Enabled)
+        {
+            try
+            {
+                var report = await RentalDataCleaner.RunAsync(username, BuildCleanupSpec(payload, removeProfile: false), WriteAgentLog);
+                WriteAgentLog($"删除租户前清理：{report.Summary}");
+            }
+            catch (Exception ex) { WriteAgentLog($"删除租户前清理失败：{ex.Message}"); }
+        }
         await RunNetAsync("user", username, "/delete");
+        if (_options.DataCleanup.Enabled && _options.DataCleanup.RemoveUserProfileOnDelete)
+            RentalDataCleaner.RemoveUserProfile(username, WriteAgentLog);
+    }
+
+    private CleanupSpec BuildCleanupSpec(JsonElement? payload, bool removeProfile)
+    {
+        var c = _options.DataCleanup;
+        bool Flag(string key, bool fallback) =>
+            payload is { } p && p.TryGetProperty(key, out var v) && v.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? v.GetBoolean() : fallback;
+        return new CleanupSpec(
+            Browsers: Flag("wipeBrowsers", c.WipeBrowsers),
+            WeChat: Flag("wipeWeChat", c.WipeWeChat),
+            RecycleBin: Flag("wipeRecycleBin", c.WipeRecycleBin),
+            RemoveProfile: removeProfile,
+            ExtraPaths: c.ExtraPaths ?? Array.Empty<string>());
+    }
+
+    private async Task MaybeRunLeaseEndCleanupAsync(bool cleanupRequested)
+    {
+        if (!cleanupRequested || !_options.DataCleanup.Enabled || !_options.DataCleanup.RunOnLeaseEnd) return;
+        var rentalId = _rental?.TryGetProperty("id", out var id) == true ? id.ToString() : "current";
+        var marker = $"lease-end:{rentalId}";
+        try { if (File.Exists(_cleanupFlagPath) && File.ReadAllText(_cleanupFlagPath).Trim() == marker) return; }
+        catch { }
+        WriteAgentLog($"网站判定租约已结束（rental={rentalId}），开始自动清理承租人数据");
+        var report = await RentalDataCleaner.RunAsync(null, BuildCleanupSpec(null, removeProfile: false), WriteAgentLog);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_cleanupFlagPath)!);
+            await File.WriteAllTextAsync(_cleanupFlagPath, marker);
+        }
+        catch (Exception ex) { WriteAgentLog($"写入清理标记失败：{ex.Message}"); }
+        WriteAgentLog($"租约到期自动清理完成：{report.Summary}");
     }
 
     private static string SafeWindowsUsername(string value)
@@ -493,6 +589,9 @@ foreach ($app in $apps) {
             var updaterPath = Path.Combine(AppContext.BaseDirectory, "RentDeviceAgent.Updater.exe");
             if (!File.Exists(updaterPath)) throw new InvalidOperationException("找不到独立更新器，请重新安装客户端");
             var updaterArgs = $"--pending \"{pending}\" --target \"{processPath}\" --version \"{version}\" --source \"https://github.com/{_options.GitHubRepository}/releases/tag/v{version}\"" + (isService ? " --service" : "");
+            // Signal the UI window that this shutdown is a sanctioned update so it
+            // lets itself be closed; the updater clears the flag when it finishes.
+            try { File.WriteAllText(_updatingFlagPath, DateTime.UtcNow.ToString("O")); } catch { }
             Process.Start(new ProcessStartInfo(updaterPath, updaterArgs) { CreateNoWindow = false, UseShellExecute = true });
             _statusText = $"发现新版本 {version}，正在更新";
             Environment.Exit(0);
@@ -632,7 +731,7 @@ foreach ($app in $apps) {
     private sealed record AgentState(bool Ok, string DeviceId, string? DeviceMode, bool RemoteLockEnabled, string? LockMessage, bool CleanupRequested);
     private sealed record CommandEnvelope(bool Ok, DeviceCommand[] Commands);
     private sealed record DeviceCommand(string Id, string DeviceId, string CommandType, string Payload, string Status, string CreatedAt, string ExpiresAt);
-    private enum AgentCommandType { SYNC, SHOW_MESSAGE, PAUSE_RENTAL, RESUME_RENTAL, REFRESH_DEVICE_INFO, CHECK_UPDATE, CREATE_RENTAL_USER, UPDATE_RENTAL_USER, DELETE_RENTAL_USER }
+    private enum AgentCommandType { SYNC, SHOW_MESSAGE, PAUSE_RENTAL, RESUME_RENTAL, REFRESH_DEVICE_INFO, CHECK_UPDATE, CREATE_RENTAL_USER, UPDATE_RENTAL_USER, DELETE_RENTAL_USER, CLEANUP_RENTAL_DATA }
     private sealed record GitHubRelease(string TagName, GitHubAsset[]? Assets);
     private sealed record GitHubAsset(string Name, string BrowserDownloadUrl);
 
