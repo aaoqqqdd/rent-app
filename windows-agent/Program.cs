@@ -12,16 +12,40 @@ static IHost CreateAgentHost(string[] arguments)
     return builder.Build();
 }
 
-static bool IsAgentServiceRunning()
+// Whether the Windows service is *installed* — not whether it happens to be RUNNING
+// this millisecond. During a user switch / logon storm the SCM is busy and
+// "sc query" often reports START_PENDING or times out; treating that as "no service"
+// makes the --ui process spin up a second AgentWorker that fights the real one.
+// If the service exists, the SCM (with its restart-on-failure actions) owns keeping
+// it alive and the UI must never host its own worker.
+static bool IsAgentServiceInstalled()
 {
-    try
+    for (var attempt = 0; attempt < 3; attempt++)
     {
-        using var process = Process.Start(new ProcessStartInfo("sc.exe", "query RentDeviceAgent") { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true });
-        var output = process?.StandardOutput.ReadToEnd() ?? "";
-        process?.WaitForExit(3000);
-        return output.Contains("RUNNING", StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("sc.exe", "query RentDeviceAgent")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            var output = (process?.StandardOutput.ReadToEnd() ?? "") + (process?.StandardError.ReadToEnd() ?? "");
+            process?.WaitForExit(5000);
+            // 1060 = ERROR_SERVICE_DOES_NOT_EXIST. Anything else (any STATE line, even
+            // "access denied") means the service is installed.
+            if (output.Contains("1060")) return false;
+            if (output.Contains("SERVICE_NAME", StringComparison.OrdinalIgnoreCase)
+                || output.Contains("STATE", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        catch { }
+        Thread.Sleep(1000);
     }
-    catch { return false; }
+    // Inconclusive every time: assume installed. A UI with no local worker is safe
+    // (the service catches up); a duplicate worker is not.
+    return true;
 }
 
 if (args.Contains("--service", StringComparer.OrdinalIgnoreCase))
@@ -34,7 +58,7 @@ ApplicationConfiguration.Initialize();
 using var uiMutex = new Mutex(true, "Local\\RentDeviceAgent.UI", out var isFirstUiInstance);
 if (!isFirstUiInstance) return;
 IHost? localHost = null;
-if (!IsAgentServiceRunning())
+if (!IsAgentServiceInstalled())
 {
     localHost = CreateAgentHost(args);
 }

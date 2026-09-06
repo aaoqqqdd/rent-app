@@ -9,6 +9,17 @@ var version = Get("--version");
 var source = Get("--source");
 var service = rawArgs.Any(x => x.Equals("--service", StringComparison.OrdinalIgnoreCase));
 if (string.IsNullOrWhiteSpace(pending) || string.IsNullOrWhiteSpace(target)) return;
+
+var updatingFlag = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+    "RentDeviceAgent", "updating.flag");
+try
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(updatingFlag)!);
+    File.WriteAllText(updatingFlag, DateTime.UtcNow.ToString("O"));
+}
+catch { }
+
 try
 {
     await Task.Delay(1500);
@@ -44,6 +55,12 @@ try
 catch (Exception ex)
 {
     MessageBox.Show($"更新失败：{ex.Message}", "PC Rental 软件更新", MessageBoxButtons.OK, MessageBoxIcon.Error);
+}
+finally
+{
+    // Whether the swap succeeded or failed, drop the "update in progress" flag so
+    // the restarted client goes back to refusing to exit while bound.
+    try { File.Delete(updatingFlag); } catch { }
 }
 
 static async Task StopTargetProcessesAsync(string targetPath)

@@ -132,6 +132,16 @@ jobs:
           $languageDir = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\Languages'
           Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl' -OutFile (Join-Path $languageDir 'ChineseSimplified.isl') -UseBasicParsing
 
+      - name: Generate installer artwork
+        shell: pwsh
+        working-directory: windows-agent
+        run: |
+          try {
+            ./tools/make-installer-assets.ps1
+          } catch {
+            Write-Warning "安装器素材生成失败，使用 Inno Setup 默认外观：$($_.Exception.Message)"
+          }
+
       - name: Build installer
         shell: pwsh
         working-directory: windows-agent

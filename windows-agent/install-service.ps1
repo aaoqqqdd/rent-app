@@ -90,6 +90,24 @@ $shortcut.Save()
 # Remove only the per-user legacy shortcut; the public shortcut above is intentional.
 $userStartupShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)) "PC Rental 设备管理.lnk"
 Remove-Item $userStartupShortcut -Force -ErrorAction SilentlyContinue
+
+# Scheduled task as the reliable autostart path. HKLM Run and the Startup-folder
+# shortcut are skipped by "disable startup apps" policy and by Windows startup
+# throttling; an at-logon task for the Users group is not, and fires for every
+# account (including a freshly created rental user) on its first interactive logon
+# and on fast-user-switch. Duplicate launches exit immediately on the UI mutex.
+$taskName = "PC Rental Device Agent UI"
+try {
+  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+  $taskAction = New-ScheduledTaskAction -Execute $exe -Argument "--ui" -WorkingDirectory $InstallPath
+  $taskTrigger = New-ScheduledTaskTrigger -AtLogOn
+  $taskPrincipal = New-ScheduledTaskPrincipal -GroupId "S-1-5-32-545" -RunLevel Limited
+  $taskSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+  Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Settings $taskSettings -Description "启动 PC Rental 设备管理界面" -Force | Out-Null
+  Write-Host "已注册登录自启计划任务 $taskName"
+} catch {
+  Write-Warning "注册计划任务失败，将依赖 HKLM Run 与启动文件夹快捷方式：$($_.Exception.Message)"
+}
 Start-Service $serviceName
 if ((Get-Service -Name $serviceName).Status -ne 'Running') { throw "服务已注册但未能进入 Running 状态" }
 Write-Host "Installed and started $serviceName"
