@@ -76,24 +76,62 @@ public sealed class AgentWorker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var cycleFailed = false;
+
             try
             {
                 if (!_bindingRevoked && string.IsNullOrWhiteSpace(_token)) await RegisterAsync(stoppingToken);
-                if (!_bindingRevoked && !string.IsNullOrWhiteSpace(_token))
-                {
-                    await SendHeartbeatAsync(stoppingToken);
-                    await ReadStateAsync(stoppingToken);
-                    await ProcessCommandsAsync(stoppingToken);
-                    await CheckForUpdateAsync(stoppingToken);
-                }
-                _consecutiveFailures = 0;
             }
             catch (Exception ex)
             {
-                _consecutiveFailures = Math.Min(_consecutiveFailures + 1, 6);
-                _logger.LogWarning(ex, "Rent device agent sync failed; will retry");
-                WriteAgentLog($"同步失败：{ex.GetType().Name}: {ex.Message}");
+                cycleFailed = true;
+                _logger.LogWarning(ex, "Rent device agent registration failed; will retry");
+                WriteAgentLog($"注册失败：{ex.GetType().Name}: {ex.Message}");
             }
+
+            if (!_bindingRevoked && !string.IsNullOrWhiteSpace(_token))
+            {
+                // Heartbeat + state share a try: a transient failure here should
+                // back the whole loop off, but must NOT stop us from pulling
+                // remote commands in the same cycle.
+                try
+                {
+                    await SendHeartbeatAsync(stoppingToken);
+                    await ReadStateAsync(stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    cycleFailed = true;
+                    _logger.LogWarning(ex, "Rent device agent heartbeat/state sync failed; will retry");
+                    WriteAgentLog($"心跳/状态同步失败：{ex.GetType().Name}: {ex.Message}");
+                }
+
+                // Command delivery runs on its own try and does NOT feed the
+                // exponential backoff: an admin who just submitted
+                // CREATE_RENTAL_USER expects it applied within seconds, so keep
+                // polling at the base interval even if this endpoint is unhappy.
+                try
+                {
+                    await ProcessCommandsAsync(stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Rent device agent command sync failed; will retry next cycle");
+                    WriteAgentLog($"拉取远程指令失败：{ex.GetType().Name}: {ex.Message}");
+                }
+
+                try
+                {
+                    await CheckForUpdateAsync(stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Rent device agent update check failed");
+                    WriteAgentLog($"检查更新失败：{ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            _consecutiveFailures = cycleFailed ? Math.Min(_consecutiveFailures + 1, 6) : 0;
 
             // Keep the website roster responsive while still avoiding a tight loop.
             // Remote commands should be picked up promptly after an admin
@@ -206,8 +244,11 @@ public sealed class AgentWorker : BackgroundService
         using var response = await client.PostAsJsonAsync(Url("/api/device-agent/heartbeat"), payload, cancellationToken);
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); WriteAgentLog("网站已解绑本机，已立即切换为未绑定状态"); return; }
         response.EnsureSuccessStatusCode();
-        var heartbeatResult = await response.Content.ReadFromJsonAsync<AgentState>(cancellationToken: cancellationToken);
-        if (heartbeatResult?.Ok != true) throw new InvalidOperationException("网站未确认心跳");
+        var heartbeatBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        AgentState? heartbeatResult = null;
+        try { heartbeatResult = JsonSerializer.Deserialize<AgentState>(heartbeatBody, new JsonSerializerOptions(JsonSerializerDefaults.Web)); } catch { }
+        if (heartbeatResult is null) throw new InvalidOperationException($"网站心跳响应无法解析：{Truncate(heartbeatBody, 300)}");
+        if (!heartbeatResult.Ok) throw new InvalidOperationException($"网站未确认心跳：{Truncate(heartbeatBody, 300)}");
         WriteAgentLog($"心跳成功：HTTP {(int)response.StatusCode}，设备 ID={_deviceId}");
         if (!string.IsNullOrWhiteSpace(heartbeatResult.DeviceMode)) _deviceMode = heartbeatResult.DeviceMode;
         await MaybeRunLeaseEndCleanupAsync(heartbeatResult.CleanupRequested);
@@ -228,21 +269,44 @@ public sealed class AgentWorker : BackgroundService
     private async Task ProcessCommandsAsync(CancellationToken cancellationToken)
     {
         using var response = await AuthenticatedClient().GetAsync(Url("/api/device-agent/commands"), cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) { MarkUnbound(); WriteAgentLog("网站已解绑本机（拉取指令返回 401）"); return; }
         response.EnsureSuccessStatusCode();
-        var envelope = await response.Content.ReadFromJsonAsync<CommandEnvelope>(cancellationToken: cancellationToken);
-        foreach (var command in envelope?.Commands ?? Array.Empty<DeviceCommand>())
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        DeviceCommand[] commands;
+        try { commands = ParseCommands(raw); }
+        catch (Exception ex)
+        {
+            WriteAgentLog($"远程指令响应无法解析：{ex.Message}；原始内容：{Truncate(raw, 600)}");
+            return;
+        }
+        if (commands.Length == 0) return;
+        WriteAgentLog($"收到 {commands.Length} 条待执行指令：{string.Join(", ", commands.Select(c => $"{c.CommandType}#{c.Id}"))}");
+        foreach (var command in commands)
         {
             var success = false;
             var resultCode = "FAILED";
             var message = "命令执行失败";
             try
             {
-                if (command.DeviceId != _deviceId) throw new InvalidOperationException("命令不属于当前设备");
-                if (!DateTimeOffset.TryParse(command.ExpiresAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var expiresAt) || expiresAt <= DateTimeOffset.UtcNow) { resultCode = "EXPIRED"; message = "命令已过期"; }
+                // The device token already scopes /commands to this machine, so a
+                // blank or mismatched-format deviceId from the website must not
+                // silently drop the command. Only reject when both sides carry a
+                // concrete id and they genuinely differ.
+                if (!string.IsNullOrWhiteSpace(command.DeviceId) && !string.IsNullOrWhiteSpace(_deviceId)
+                    && !command.DeviceId.Equals(_deviceId, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"命令目标设备 {command.DeviceId} 与本机 {_deviceId} 不一致");
+                // Missing / unparseable expiry means "no expiry", not "expired" -
+                // otherwise a website that stops sending expiresAt silently drops
+                // every command.
+                if (!string.IsNullOrWhiteSpace(command.ExpiresAt)
+                    && DateTimeOffset.TryParse(command.ExpiresAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var expiresAt)
+                    && expiresAt <= DateTimeOffset.UtcNow) { resultCode = "EXPIRED"; message = "命令已过期"; }
                 else if (!Enum.TryParse<AgentCommandType>(command.CommandType, true, out var type)) { resultCode = "UNSUPPORTED"; message = "不支持的命令类型"; }
                 else
                 {
-                    var commandPayload = JsonSerializer.Deserialize<JsonElement>(command.Payload ?? "{}" );
+                    JsonElement commandPayload;
+                    try { commandPayload = JsonSerializer.Deserialize<JsonElement>(string.IsNullOrWhiteSpace(command.Payload) ? "{}" : command.Payload); }
+                    catch { commandPayload = JsonSerializer.Deserialize<JsonElement>("{}"); }
                     switch (type)
                     {
                         case AgentCommandType.SYNC:
@@ -283,6 +347,55 @@ public sealed class AgentWorker : BackgroundService
         }
     }
 
+    // Tolerate the several shapes the website's /commands response has shipped in:
+    // a bare array, or { commands: [...] } / { data: { commands: [...] } } /
+    // { items: [...] }, with either camelCase or snake_case keys, and a payload
+    // that is either a JSON string or an inline JSON object.
+    private static DeviceCommand[] ParseCommands(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return Array.Empty<DeviceCommand>();
+        using var doc = JsonDocument.Parse(raw);
+        var root = doc.RootElement;
+        JsonElement array;
+        if (root.ValueKind == JsonValueKind.Array) array = root;
+        else if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("commands", out var c) && c.ValueKind == JsonValueKind.Array) array = c;
+        else if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.Object && d.TryGetProperty("commands", out var dc) && dc.ValueKind == JsonValueKind.Array) array = dc;
+        else if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var da) && da.ValueKind == JsonValueKind.Array) array = da;
+        else if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("items", out var it) && it.ValueKind == JsonValueKind.Array) array = it;
+        else return Array.Empty<DeviceCommand>();
+
+        var list = new List<DeviceCommand>();
+        foreach (var element in array.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.Object) continue;
+            string? Field(params string[] names)
+            {
+                foreach (var name in names)
+                    if (element.TryGetProperty(name, out var value))
+                        return value.ValueKind switch
+                        {
+                            JsonValueKind.String => value.GetString(),
+                            JsonValueKind.Null or JsonValueKind.Undefined => null,
+                            JsonValueKind.Object or JsonValueKind.Array => value.GetRawText(),
+                            _ => value.ToString(),
+                        };
+                return null;
+            }
+            list.Add(new DeviceCommand(
+                Id: Field("id", "commandId", "command_id") ?? "",
+                DeviceId: Field("deviceId", "device_id") ?? "",
+                CommandType: Field("commandType", "command_type", "type") ?? "",
+                Payload: Field("payload", "parameters", "params") ?? "{}",
+                Status: Field("status") ?? "",
+                CreatedAt: Field("createdAt", "created_at") ?? "",
+                ExpiresAt: Field("expiresAt", "expires_at") ?? ""));
+        }
+        return list.ToArray();
+    }
+
+    private static string Truncate(string? value, int max) =>
+        string.IsNullOrEmpty(value) ? "" : value.Length <= max ? value : value[..max] + "…";
+
     private static async Task ApplyRentalUserAsync(JsonElement payload, bool create)
     {
         var username = SafeWindowsUsername(payload.TryGetProperty("username", out var name) ? name.ToString() : "");
@@ -296,7 +409,11 @@ public sealed class AgentWorker : BackgroundService
         // Explicitly remove elevated membership even when Windows reused an existing
         // local account or an old provisioning attempt added it to Administrators.
         await RunNetBestEffortAsync("localgroup", "Administrators", username, "/delete");
-        await RunNetAsync("localgroup", "Users", username, "/add");
+        // net.exe already puts a freshly created account in the local Users group,
+        // so a second explicit /add returns error 1378 ("already a member"). Keep
+        // it as a best-effort safety net instead of letting it fail the whole
+        // CREATE_RENTAL_USER command.
+        await RunNetBestEffortAsync("localgroup", "Users", username, "/add");
         // Only seed the tenant desktop when the account is first created. A plain
         // password change (UPDATE_RENTAL_USER on an existing account) must never
         // re-copy the template desktop, or the tenant's own desktop changes get
@@ -320,6 +437,7 @@ public sealed class AgentWorker : BackgroundService
             catch (Exception ex) { WriteAgentLog($"删除租户前清理失败：{ex.Message}"); }
         }
         await RunNetAsync("user", username, "/delete");
+        await RemoveSeedDesktopTaskAsync(username);
         if (_options.DataCleanup.Enabled && _options.DataCleanup.RemoveUserProfileOnDelete)
             RentalDataCleaner.RemoveUserProfile(username, WriteAgentLog);
     }
@@ -386,14 +504,26 @@ public sealed class AgentWorker : BackgroundService
         catch { return false; }
     }
 
+    // Task Scheduler name that seeds a given tenant's desktop on their first logon.
+    private static string SeedDesktopTaskName(string username) => "RentDeviceAgent-SeedDesktop-" + username;
+
     private static async Task InstallRentalShortcutsAsync(string username)
     {
-        // Copy installed shortcuts from the public desktop/start menu. Missing apps are
-        // intentionally ignored so account provisioning remains successful.
-        const string script = @"
+        // The tenant's user profile does not exist until their first interactive
+        // logon. Creating C:\Users\<user>\Desktop from the service beforehand makes
+        // the Windows profile service reject the folder and sign the tenant into a
+        // temporary profile ("无法正常使用"). So instead of copying anything now,
+        // register a one-shot logon task that runs inside the tenant session -
+        // after the real profile is built - copies the template desktop, then
+        // deletes itself.
+        var seedScript = @"
 $ErrorActionPreference = 'SilentlyContinue'
-$user = $env:RENTAL_USER
-$desktop = Join-Path $env:SystemDrive ('Users\' + $user + '\Desktop')
+# Seed the desktop exactly once. The marker guards against the task lingering
+# (a standard user may lack rights to delete a SYSTEM-registered task) so a
+# second logon never re-copies the template over the tenant's own changes.
+$marker = Join-Path $env:USERPROFILE '.rent-desktop-seeded'
+if (Test-Path $marker) { Unregister-ScheduledTask -TaskName $env:SEED_TASK_NAME -Confirm:$false; return }
+$desktop = Join-Path $env:USERPROFILE 'Desktop'
 New-Item -ItemType Directory -Path $desktop -Force | Out-Null
 $templateDesktops = @(
   (Join-Path $env:SystemDrive 'Users\Admin\Desktop'),
@@ -410,8 +540,7 @@ foreach ($template in $templateDesktops) {
 }
 $roots = @(
   (Join-Path $env:PUBLIC 'Desktop'),
-  (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'),
-  (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs')
+  (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs')
 )
 $apps = @(
   @{ Name = 'ToDesk'; Patterns = @('*ToDesk*.lnk', '*ToDesk*.url') },
@@ -430,19 +559,55 @@ foreach ($app in $apps) {
   }
   if ($source) { Copy-Item $source.FullName (Join-Path $desktop $source.Name) -Force }
 }
+Set-Content -Path $marker -Value (Get-Date -Format o) -Force
+attrib +h $marker
+Unregister-ScheduledTask -TaskName $env:SEED_TASK_NAME -Confirm:$false
 ";
-        var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+        var seedEncoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(seedScript));
+
+        // Runs as the local service; registers a task that itself runs as the
+        // tenant (non-elevated) only while they are interactively logged on, so no
+        // password needs to be stored.
+        var registerScript = @"
+$ErrorActionPreference = 'Stop'
+$user = $env:RENTAL_USER
+$name = $env:SEED_TASK_NAME
+$arg  = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ' + $env:SEED_ENCODED
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+";
+        var registerEncoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(registerScript));
         using var process = new Process { StartInfo = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } };
         process.StartInfo.ArgumentList.Add("-NoProfile");
         process.StartInfo.ArgumentList.Add("-NonInteractive");
         process.StartInfo.ArgumentList.Add("-ExecutionPolicy");
         process.StartInfo.ArgumentList.Add("Bypass");
         process.StartInfo.ArgumentList.Add("-EncodedCommand");
-        process.StartInfo.ArgumentList.Add(encoded);
+        process.StartInfo.ArgumentList.Add(registerEncoded);
         process.StartInfo.Environment["RENTAL_USER"] = username;
+        process.StartInfo.Environment["SEED_TASK_NAME"] = SeedDesktopTaskName(username);
+        process.StartInfo.Environment["SEED_ENCODED"] = seedEncoded;
         if (!process.Start()) return;
         await process.WaitForExitAsync();
-        if (process.ExitCode != 0) WriteAgentLog($"租户桌面快捷方式复制失败：{(await process.StandardError.ReadToEndAsync()).Trim()}");
+        if (process.ExitCode != 0)
+            WriteAgentLog($"登记租户桌面初始化任务失败：{(await process.StandardError.ReadToEndAsync()).Trim()}");
+        else
+            WriteAgentLog($"已登记租户 {username} 首次登录时初始化桌面（模板：Admin 桌面）");
+    }
+
+    private static async Task RemoveSeedDesktopTaskAsync(string username)
+    {
+        // Best-effort: drop a still-pending seed task if the tenant never logged in
+        // before the account was deleted.
+        using var process = new Process { StartInfo = new ProcessStartInfo("schtasks.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true } };
+        process.StartInfo.ArgumentList.Add("/Delete");
+        process.StartInfo.ArgumentList.Add("/TN");
+        process.StartInfo.ArgumentList.Add(SeedDesktopTaskName(username));
+        process.StartInfo.ArgumentList.Add("/F");
+        try { if (process.Start()) await process.WaitForExitAsync(); } catch { }
     }
 
     private async Task WriteRefreshRequestAsync()
